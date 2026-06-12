@@ -1,0 +1,11 @@
+# 运行时数据与密钥 —— 永不入库
+data/
+.env
+*.db
+*.db-journal
+*.db-wal
+__pycache__/
+*.egg-info/
+dist/
+build/
+.DS_Store

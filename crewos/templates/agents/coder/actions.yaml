@@ -1,0 +1,9 @@
+# 动作风险登记表 — L0 静默 / L1 日志 / L2 通知 / L3 倒计时放行 / L4 人工审批
+# 未登记的动作一律按 L3(60 秒倒计时)处理,宁可多问不可漏报
+actions:
+  write_code: {risk: 0}
+  run_tests: {risk: 0}
+  create_branch: {risk: 1}
+  create_pr: {risk: 3, auto_approve_seconds: 30}
+  git_push: {risk: 3, auto_approve_seconds: 10}
+  merge_pr: {risk: 4}

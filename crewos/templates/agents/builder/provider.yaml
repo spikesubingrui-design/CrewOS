@@ -1,0 +1,11 @@
+model: "glm-5.1"
+channels:
+  - name: openrouter
+    endpoint: "https://openrouter.ai/api/v1"
+    key_env: OPENROUTER_KEY
+  - name: zhipu-direct
+    endpoint: "https://open.bigmodel.cn/api/paas/v4"
+    key_env: ZHIPU_KEY
+fallback_model: "qwen3.7-max"
+pricing: {input_per_m: 0.50, output_per_m: 2.00}
+temperature: 0.5

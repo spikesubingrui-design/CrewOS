@@ -1,0 +1,7 @@
+# 动作风险登记表 — L0 静默 / L1 日志 / L2 通知 / L3 倒计时放行 / L4 人工审批
+# 未登记的动作一律按 L3(60 秒倒计时)处理,宁可多问不可漏报
+actions:
+  generate_contract: {risk: 1}
+  draft_email: {risk: 1}
+  send_email: {risk: 3, auto_approve_seconds: 30}
+  create_invoice: {risk: 4}

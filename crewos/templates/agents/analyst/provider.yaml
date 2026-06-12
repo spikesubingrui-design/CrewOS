@@ -1,0 +1,11 @@
+model: "deepseek-v4-pro"
+channels:
+  - name: openrouter
+    endpoint: "https://openrouter.ai/api/v1"
+    key_env: OPENROUTER_KEY
+  - name: deepseek-direct
+    endpoint: "https://api.deepseek.com/v1"
+    key_env: DEEPSEEK_KEY
+fallback_model: "qwen3.7-max"
+pricing: {input_per_m: 0.27, output_per_m: 1.10}
+temperature: 0.2

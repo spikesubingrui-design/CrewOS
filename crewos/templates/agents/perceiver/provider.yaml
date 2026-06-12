@@ -1,0 +1,8 @@
+model: "doubao-seed-2.0-lite"
+channels:
+  - name: volcengine-ark
+    endpoint: "https://ark.cn-beijing.volces.com/api/v3"
+    key_env: ARK_KEY
+fallback_model: ""
+pricing: {input_per_m: 0.30, output_per_m: 0.67}
+temperature: 0.3

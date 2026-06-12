@@ -1,0 +1,13 @@
+model: "kimi-k2.6"
+channels:
+  - name: openrouter
+    endpoint: "https://openrouter.ai/api/v1"
+    key_env: OPENROUTER_KEY
+  - name: moonshot
+    endpoint: "https://api.moonshot.cn/v1"
+    key_env: MOONSHOT_KEY
+fallback_model: "qwen3.7-max"
+pricing:
+  input_per_m: 0.80
+  output_per_m: 3.20
+temperature: 0.3

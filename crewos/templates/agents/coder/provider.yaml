@@ -1,0 +1,13 @@
+model: "codex-5.5"
+channels:
+  - name: openrouter
+    endpoint: "https://openrouter.ai/api/v1"
+    key_env: OPENROUTER_KEY
+  - name: openai-direct
+    endpoint: "https://api.openai.com/v1"
+    key_env: OPENAI_KEY
+fallback_model: "minimax-m3"   # 挑战者/备用,启用需用户授权(交接式换模型)
+pricing:
+  input_per_m: 2.50
+  output_per_m: 10.00
+temperature: 0.2

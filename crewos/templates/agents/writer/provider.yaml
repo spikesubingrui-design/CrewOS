@@ -1,0 +1,13 @@
+model: "qwen3.7-max"
+channels:
+  - name: openrouter
+    endpoint: "https://openrouter.ai/api/v1"
+    key_env: OPENROUTER_KEY
+  - name: dashscope
+    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    key_env: DASHSCOPE_KEY
+fallback_model: "glm-5.1"
+pricing:
+  input_per_m: 0.40
+  output_per_m: 1.60
+temperature: 0.8

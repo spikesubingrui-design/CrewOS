@@ -1,0 +1,7 @@
+# 动作风险登记表 — L0 静默 / L1 日志 / L2 通知 / L3 倒计时放行 / L4 人工审批
+# 未登记的动作一律按 L3(60 秒倒计时)处理,宁可多问不可漏报
+actions:
+  analyze_data: {risk: 0}
+  generate_report: {risk: 1}
+  fetch_from_boss: {risk: 2}
+  send_greeting: {risk: 3, auto_approve_seconds: 60}

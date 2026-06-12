@@ -123,6 +123,45 @@ class Ledger:
         ).fetchone()["c"]
         return {"total_usd": round(total, 6), "by_agent": by_agent, "by_model": by_model}
 
+    def eval_report(self) -> dict:
+        """评估集自动生长:每个任务就是一条评估样本,从台账聚合模型胜任度。
+        每 agent×模型:任务数 / 一次过率 / 平均轮次 / 上报数 / 总成本。
+        换模型后新旧模型分开统计,直接对比谁更胜任这个角色。"""
+        rows = self._conn.execute(
+            "SELECT task_id, from_agent, type, round, model, cost_usd "
+            "FROM events ORDER BY ts").fetchall()
+        tasks: dict[str, dict] = {}
+        for r in rows:
+            t = tasks.setdefault(r["task_id"], {"agents": {}, "escalated": False})
+            if r["type"] == "task_result" and r["model"]:
+                a = t["agents"].setdefault((r["from_agent"], r["model"]),
+                                           {"rounds": 0, "cost": 0.0})
+                a["rounds"] = max(a["rounds"], r["round"])
+                a["cost"] += r["cost_usd"]
+            elif r["type"] == "escalation":
+                t["escalated"] = True
+        stats: dict[tuple, dict] = {}
+        for t in tasks.values():
+            for key, a in t["agents"].items():
+                s = stats.setdefault(key, {"tasks": 0, "first_pass": 0,
+                                           "rounds_sum": 0, "escalations": 0,
+                                           "cost": 0.0})
+                s["tasks"] += 1
+                s["first_pass"] += 1 if a["rounds"] == 0 else 0
+                s["rounds_sum"] += a["rounds"]
+                s["escalations"] += 1 if t["escalated"] else 0
+                s["cost"] += a["cost"]
+        out = []
+        for (agent, model), s in sorted(stats.items()):
+            out.append({
+                "agent": agent, "model": model, "tasks": s["tasks"],
+                "first_pass_rate": round(s["first_pass"] / s["tasks"], 3),
+                "avg_rounds": round(s["rounds_sum"] / s["tasks"], 2),
+                "escalations": s["escalations"],
+                "cost_usd": round(s["cost"], 6),
+            })
+        return {"samples": len(tasks), "by_agent_model": out}
+
     def replay(self, task_id: str) -> str:
         """人类可读的任务回放。"""
         lines = []

@@ -120,6 +120,30 @@ def _risk_engine(ws):
     return RiskEngine(ws / "agents", ledger)
 
 
+def cmd_jobs(args):
+    from .cron import load_jobs
+    jobs = load_jobs(_ws(args))
+    if not jobs:
+        print("  无定时任务(编辑 config/crontab.yaml 添加)")
+        return
+    for j in jobs:
+        flag = "●" if j.get("enabled", True) else "○"
+        print(f"  {flag} {j.get('name','?'):<20} {j.get('schedule','?'):<14} "
+              f"{j.get('agent','?'):<11} {j.get('instruction','')[:50]}")
+    print("\n  ● 启用 ○ 停用 — 调度器随 crewos start 运行,改 yaml 即生效")
+
+
+def cmd_evals(args):
+    _, ledger = _router(_ws(args))
+    rep = ledger.eval_report()
+    print(f"  评估样本(任务)总数: {rep['samples']}\n")
+    print(f"  {'AGENT':<12}{'MODEL':<22}{'任务':<6}{'一次过':<8}{'均轮次':<8}{'上报':<6}成本USD")
+    for r in rep["by_agent_model"]:
+        print(f"  {r['agent']:<12}{r['model']:<22}{r['tasks']:<6}"
+              f"{r['first_pass_rate']:<8.0%}{r['avg_rounds']:<8}{r['escalations']:<6}"
+              f"{r['cost_usd']:.4f}")
+
+
 def cmd_approvals(args):
     pending = _risk_engine(_ws(args)).pending()
     if not pending:
@@ -167,6 +191,8 @@ def main():
     s.add_argument("instruction")
     s.set_defaults(fn=cmd_dispatch)
 
+    sub.add_parser("jobs", help="定时任务列表(crontab.yaml)").set_defaults(fn=cmd_jobs)
+    sub.add_parser("evals", help="模型胜任度报表").set_defaults(fn=cmd_evals)
     sub.add_parser("approvals", help="待审批动作(L3/L4)").set_defaults(fn=cmd_approvals)
     s = sub.add_parser("approve", help="批准动作")
     s.add_argument("approval_id")

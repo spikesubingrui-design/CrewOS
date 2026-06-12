@@ -225,7 +225,6 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
   <div class="clockbox"><span class="micro">UTC</span><b id="utc">--:--:--</b></div>
   <div class="clockbox"><span class="micro">MET</span><b id="met">T+00:00:00</b></div>
   <div class="clockbox" id="fuelbox"><span class="micro">FUEL USED</span><b id="fuel">$0.0000</b></div>
-  <button id="sim-btn" onclick="runSim()">RUN SIMULATION</button>
 </div>
 
 <!-- ORBIT -->
@@ -285,12 +284,21 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
             <input type="number" id="s-warn" step="10" min="10"></div>
           <div class="frow"><label class="micro">Security Protocols — DLP 黑名单(每行一条,绝不外泄)</label>
             <textarea id="s-blocklist"></textarea></div>
+          <div class="frow"><label class="micro">Comms Relay — 飞书机器人 webhook(任务交付/上报/审批推送到飞书)</label>
+            <input type="text" id="s-feishu" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" style="width:100%"></div>
+          <div class="frow"><label class="micro">通用 webhook(可选,POST JSON)</label>
+            <input type="text" id="s-webhook" placeholder="https://…" style="width:100%"></div>
           <button class="btn" onclick="saveSettings()">COMMIT</button>
         </div>
       </div>
       <div class="panel" style="margin-top:16px">
         <div class="panel-h"><span class="micro">Uplink Status / API 通道</span></div>
         <div class="cfg-body" id="uplink"></div>
+      </div>
+      <div class="panel" style="margin-top:16px">
+        <div class="panel-h"><span class="micro">Crew Performance / 模型胜任度</span>
+          <span class="micro" id="ev-samples">--</span></div>
+        <div class="cfg-body" id="evals" style="font-size:11px"></div>
       </div>
     </div>
     <div>
@@ -397,7 +405,9 @@ async function init(){
   const ml=$("#manifest-list"),tx=$("#tx-agent"),fs=$("#f-select");
   ml.innerHTML="";tx.innerHTML="";
   fs.innerHTML=`<option value="CrewOS.md">COMMAND DOCTRINE — CrewOS.md</option>
-                <option value="config/dlp_blocklist.txt">SECURITY — DLP blocklist</option>`;
+                <option value="config/dlp_blocklist.txt">SECURITY — DLP blocklist</option>
+                <option value="config/crontab.yaml">SCHEDULES — crontab.yaml(定时任务)</option>
+                <option value="memory/tree.md">MEMORY TREE — 跨项目记忆索引</option>`;
   const field=$("#orbitfield");
   $$(".node").forEach(n=>n.remove());
   agents.forEach((a,i)=>{
@@ -421,8 +431,8 @@ async function init(){
        <option value="agents/${a.name}/memory/lessons.md">${cs} — 错题本</option>`);
   });
   layoutOrbit();orbitTick();renderUplink();llmInit();loadCost();loadSettings();loadFile();connectWS();
-  loadApprovals();
-  setInterval(loadCost,15000);setInterval(loadApprovals,20000);
+  loadApprovals();loadEvals();
+  setInterval(loadCost,15000);setInterval(loadApprovals,20000);setInterval(loadEvals,60000);
   tele({ts:Date.now()/1000,from_agent:"sys",to_agent:"",type:"status_update",payload:"{}",cost_usd:0},
        "MISSION CONTROL ONLINE · "+agents.length+" CREW ON ORBIT");
 }
@@ -600,12 +610,6 @@ async function txSend(){
     body:JSON.stringify({agent,instruction:v})});
   if(!r.ok){const e=await r.json();alert_("err","TX FAILED",e.detail||e.error)}
 }
-async function runSim(){
-  const b=$("#sim-btn");b.disabled=true;b.textContent="SIMULATION RUNNING";
-  await fetch("/api/demo",{method:"POST"});
-  b.disabled=false;b.textContent="RUN SIMULATION";loadMissions();loadCost();
-}
-
 /* ════════ MISSIONS / RECORDER ════════ */
 async function loadMissions(){
   const tasks=await (await fetch("/api/tasks")).json();
@@ -646,15 +650,30 @@ async function loadCost(){
 async function loadSettings(){
   const s=await (await fetch("/api/settings")).json();
   $("#s-budget").value=s.default_task_budget_usd;$("#s-warn").value=s.monthly_warn_usd;
+  $("#s-feishu").value=s.feishu_webhook||"";$("#s-webhook").value=s.webhook_url||"";
   const bl=await (await fetch("/api/file?path=config/dlp_blocklist.txt")).json();
   if(bl.content!==undefined)$("#s-blocklist").value=bl.content;
 }
 async function saveSettings(){
   await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({default_task_budget_usd:+$("#s-budget").value,monthly_warn_usd:+$("#s-warn").value})});
+    body:JSON.stringify({default_task_budget_usd:+$("#s-budget").value,monthly_warn_usd:+$("#s-warn").value,
+      feishu_webhook:$("#s-feishu").value.trim(),webhook_url:$("#s-webhook").value.trim()})});
   await fetch("/api/file",{method:"PUT",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({path:"config/dlp_blocklist.txt",content:$("#s-blocklist").value})});
-  alert_("info","CONFIG","fuel limits & security protocols committed");
+  alert_("info","CONFIG","fuel limits / security / comms relay committed");
+}
+async function loadEvals(){
+  const r=await (await fetch("/api/evals")).json();
+  $("#ev-samples").textContent=r.samples+" SAMPLES";
+  if(!r.by_agent_model.length){$("#evals").innerHTML='<span class="micro">暂无模型产出样本 — 每个任务的产出都会自动成为评估样本</span>';return}
+  $("#evals").innerHTML=`<table style="width:100%;border-collapse:collapse">
+    <tr class="micro" style="text-align:left"><th>CREW</th><th>MODEL</th><th>任务</th><th>一次过</th><th>均轮</th><th>上报</th><th>USD</th></tr>
+    ${r.by_agent_model.map(e=>`<tr style="line-height:2.1;border-top:1px solid var(--line)">
+      <td>${CALLSIGN[e.agent]||e.agent}</td><td style="color:var(--dim)">${e.model}</td>
+      <td>${e.tasks}</td><td style="color:${e.first_pass_rate>=.7?"var(--green)":"var(--amber)"}">${Math.round(e.first_pass_rate*100)}%</td>
+      <td>${e.avg_rounds}</td><td style="color:${e.escalations?"var(--red)":"var(--dim)"}">${e.escalations}</td>
+      <td style="color:var(--amber)">${e.cost_usd.toFixed(4)}</td></tr>`).join("")}
+  </table>`;
 }
 async function loadFile(){
   const p=$("#f-select").value;

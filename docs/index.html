@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CREWOS — 一人公司的 AI 团队操作系统</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="CrewOS:Claude 任总指挥,7 个专属模型乘组执行。多模型异构 + 实时可视化 + 风险分级自动化,成本降 85%+。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#04060c;--panel:rgba(9,13,24,.72);--panel-solid:#0a0f1c;
+  --line:rgba(150,180,255,.10);--line-strong:rgba(150,180,255,.22);
+  --text:#e8eefc;--dim:#5d6b85;--ice:#9db8ff;--blue:#4f7cff;
+  --green:#2ee59d;--amber:#ffb454;--red:#ff5c5c;
+  --disp:"Space Grotesk",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:14px;overflow-x:hidden}
+#stars{position:fixed;inset:0;z-index:0}
+main{position:relative;z-index:2;max-width:1100px;margin:0 auto;padding:0 24px}
+.micro{font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:var(--dim)}
+a{color:var(--ice)}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:rgba(150,180,255,.15);border-radius:3px}
+
+/* hero */
+#hero{min-height:92vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:26px}
+#hero .badge{font-size:10px;letter-spacing:.3em;color:var(--ice);border:1px solid var(--line-strong);padding:7px 16px;border-radius:2px}
+#hero h1{font-family:var(--disp);font-weight:700;font-size:clamp(52px,9vw,108px);letter-spacing:.3em;margin-right:-.3em;
+  background:linear-gradient(180deg,#fff,#9db8ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+#hero .tag{font-family:var(--disp);font-size:clamp(17px,2.4vw,24px);color:var(--text);letter-spacing:.1em}
+#hero .sub{color:var(--dim);max-width:660px;line-height:2}
+.btnrow{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+.btn{font-family:var(--mono);font-size:11px;letter-spacing:.22em;padding:14px 30px;cursor:pointer;text-decoration:none;
+  color:var(--ice);background:transparent;border:1px solid var(--ice);border-radius:2px;transition:.2s;font-weight:600}
+.btn:hover{background:var(--ice);color:var(--bg);box-shadow:0 0 26px rgba(157,184,255,.45)}
+.btn.solid{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.solid:hover{filter:brightness(1.25);box-shadow:0 0 26px rgba(79,124,255,.5)}
+#hero .scroll{position:absolute;bottom:30px;color:var(--dim);font-size:10px;letter-spacing:.3em;animation:bob 2s infinite}
+@keyframes bob{50%{transform:translateY(6px)}}
+
+section{padding:90px 0}
+.sec-h{text-align:center;margin-bottom:46px}
+.sec-h h2{font-family:var(--disp);font-size:clamp(24px,3.6vw,36px);letter-spacing:.2em;margin-bottom:12px}
+.sec-h p{color:var(--dim)}
+
+/* simulation */
+#sim-wrap{background:var(--panel);border:1px solid var(--line);border-radius:4px;backdrop-filter:blur(6px);overflow:hidden}
+#sim-top{display:flex;align-items:center;gap:18px;padding:13px 18px;border-bottom:1px solid var(--line)}
+#sim-top .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 9px var(--green);animation:lamp 1.2s infinite}
+@keyframes lamp{50%{opacity:.35}}
+#sim-grid{display:grid;grid-template-columns:1.25fr 1fr;min-height:430px}
+#sim-orbit{position:relative;overflow:hidden;border-right:1px solid var(--line)}
+#orbitsvg{position:absolute;inset:0;width:100%;height:100%}
+.node{position:absolute;z-index:4;transform:translate(-50%,-50%);text-align:center;width:110px;pointer-events:none}
+.node .core{width:12px;height:12px;border-radius:50%;margin:0 auto;background:#16203a;border:1.5px solid var(--line-strong);transition:.3s;position:relative}
+.node.engaged .core{background:var(--green);border-color:var(--green);box-shadow:0 0 16px var(--green)}
+.node.engaged .core::after{content:"";position:absolute;inset:-7px;border:1px solid rgba(46,229,157,.5);border-radius:50%;animation:ring 1.6s infinite}
+@keyframes ring{from{transform:scale(.6);opacity:1}to{transform:scale(1.7);opacity:0}}
+.node .cs{margin-top:8px;font-size:9.5px;font-weight:600;letter-spacing:.12em;color:var(--ice)}
+.node .md{font-size:8px;color:var(--dim);margin-top:2px}
+#cmd{position:absolute;z-index:4;transform:translate(-50%,-50%);text-align:center;width:150px;pointer-events:none}
+#cmd .core{width:30px;height:30px;margin:0 auto;border-radius:50%;background:radial-gradient(circle at 35% 35%,#2a3c6e,#0d1426);
+  border:1.5px solid var(--ice);box-shadow:0 0 26px rgba(157,184,255,.35);transition:.4s}
+#cmd.reviewing .core{border-color:var(--amber);box-shadow:0 0 40px rgba(255,180,84,.6);animation:cmdp 1.3s infinite}
+@keyframes cmdp{50%{box-shadow:0 0 60px rgba(255,180,84,.85)}}
+#cmd .cs{margin-top:8px;font-size:10px;font-weight:700;letter-spacing:.22em}
+#cmd-st{font-size:8.5px;color:var(--amber);margin-top:4px;letter-spacing:.08em;min-height:12px}
+.pulse-dot{position:absolute;z-index:6;width:5px;height:5px;border-radius:50%;background:var(--ice);
+  box-shadow:0 0 10px var(--ice),0 0 22px var(--blue);pointer-events:none}
+.pulse-dot.ret{background:var(--green);box-shadow:0 0 10px var(--green)}
+#sim-tele{display:flex;flex-direction:column;overflow:hidden}
+#tele-h{padding:11px 16px;border-bottom:1px solid var(--line)}
+#tele{flex:1;overflow:hidden;padding:10px 16px;font-size:10.5px;line-height:2;max-height:330px}
+.tl{opacity:0;animation:tin .35s forwards}
+@keyframes tin{to{opacity:1}}
+.tl .ts{color:var(--dim)}.tl .assign{color:var(--ice)}.tl .result{color:var(--green)}
+.tl .review{color:var(--amber)}.tl .done{color:var(--green);font-weight:600}.tl .retro{color:#b79cff}
+.tl .cost{color:var(--amber)}
+#sim-ap{padding:12px 16px;border-top:1px solid var(--line);min-height:104px}
+.apcard{background:var(--panel-solid);border:1px solid var(--amber);border-left-width:3px;padding:11px 13px;font-size:10.5px;animation:tin .3s}
+.apcard.l4{border-color:var(--red)}
+.apcard .aptag{font-size:8.5px;letter-spacing:.2em;color:var(--amber)}
+.apcard.l4 .aptag{color:var(--red)}
+.apbar{height:3px;background:rgba(255,180,84,.18);margin:8px 0;overflow:hidden}
+.apbar i{display:block;height:100%;background:var(--amber)}
+.apbtns{display:flex;gap:8px;margin-top:8px}
+.apbtns span{flex:1;text-align:center;font-size:9px;letter-spacing:.16em;padding:7px 0;border:1px solid var(--ice);color:var(--ice)}
+.apbtns span.deny{border-color:var(--red);color:var(--red)}
+
+/* features */
+#features .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.feat{background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:26px 24px;transition:.25s}
+.feat:hover{border-color:var(--line-strong);transform:translateY(-3px);box-shadow:0 16px 44px rgba(0,0,0,.4)}
+.feat .ic{font-size:20px;margin-bottom:14px}
+.feat h3{font-family:var(--disp);font-size:15px;letter-spacing:.08em;margin-bottom:10px}
+.feat p{color:var(--dim);font-size:12px;line-height:1.9}
+
+/* cost */
+#cost table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line)}
+#cost th,#cost td{padding:14px 18px;text-align:left;border-bottom:1px solid var(--line);font-size:12.5px}
+#cost th{color:var(--dim);font-size:10px;letter-spacing:.2em;text-transform:uppercase}
+#cost td.save{color:var(--green);font-weight:600}
+#cost td.old{color:var(--dim);text-decoration:line-through}
+
+/* install */
+#install pre{background:#070b16;border:1px solid var(--line-strong);border-radius:3px;padding:24px 26px;
+  font-size:13px;line-height:2.1;overflow-x:auto;position:relative}
+#install pre b{color:var(--green);font-weight:400}
+#install pre i{color:var(--dim);font-style:normal}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:26px}
+.step{border:1px solid var(--line);padding:20px;border-radius:3px}
+.step .n{color:var(--blue);font-family:var(--disp);font-size:22px;font-weight:700}
+.step p{color:var(--dim);font-size:12px;line-height:1.9;margin-top:8px}
+
+footer{padding:60px 0 80px;text-align:center;color:var(--dim);font-size:11px;line-height:2.2;border-top:1px solid var(--line)}
+@media(max-width:880px){#sim-grid{grid-template-columns:1fr}#sim-orbit{height:360px;border-right:none;border-bottom:1px solid var(--line)}
+#features .grid,.steps{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<canvas id="stars"></canvas>
+<main>
+
+<div id="hero">
+  <div class="badge">OPEN SOURCE · MIT</div>
+  <h1>CREWOS</h1>
+  <div class="tag">一人公司的 AI 团队操作系统</div>
+  <p class="sub">人类公司用飞书管理团队,一人公司用 CrewOS 管理 AI 团队。<br>
+  Claude 任总指挥只做决策,7 个专属模型乘组执行 —— 贵模型做决策,便宜模型做执行,成本降 85%+。</p>
+  <div class="btnrow">
+    <a class="btn solid" href="https://github.com/spikesubingrui-design/CrewOS">GITHUB ▸</a>
+    <a class="btn" href="#install">安装 / INSTALL</a>
+  </div>
+  <div class="scroll">▼ LIVE SIMULATION</div>
+</div>
+
+<section id="sim">
+  <div class="sec-h">
+    <h2>透明玻璃办公室</h2>
+    <p>别的框架是黑盒,CrewOS 让你看见每一次派单、审阅、打回与放行 —— 下面是循环播放的真实工作流</p>
+  </div>
+  <div id="sim-wrap">
+    <div id="sim-top">
+      <span class="dot"></span><span class="micro">Mission Control · Simulation Loop</span>
+      <span class="micro" style="margin-left:auto" id="sim-cost">FUEL $0.0000</span>
+    </div>
+    <div id="sim-grid">
+      <div id="sim-orbit">
+        <svg id="orbitsvg"></svg>
+        <div id="cmd"><div class="core"></div><div class="cs">CDR · FABLE-5</div>
+          <div class="micro" style="font-size:7.5px">DECIDES, NEVER EXECUTES</div><div id="cmd-st">STANDING BY</div></div>
+      </div>
+      <div id="sim-tele">
+        <div id="tele-h"><span class="micro">Telemetry / Comms</span></div>
+        <div id="tele"></div>
+        <div id="sim-ap"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="sec-h"><h2>为什么是 CREWOS</h2>
+    <p>多模型异构 × 实时可视化 × 风险分级自动化 —— 市面上没有第二个</p></div>
+  <div class="grid">
+    <div class="feat"><div class="ic">🧠</div><h3>贵模型决策,便宜模型执行</h3>
+      <p>CEO(Claude)只做分析、拆解、派单、审阅,绝不亲自执行。coder/writer/researcher 等 7 个角色各绑一个最划算的专属模型,一人一脑,角色纯粹。</p></div>
+    <div class="feat"><div class="ic">🔁</div><h3>CEO 审阅循环</h3>
+      <p>产出不合格就给出具体修改意见重派,最多 3 轮;仍不达标自动上报给你,附分析与建议。打回原因自动写入该角色的错题本。</p></div>
+    <div class="feat"><div class="ic">⚠️</div><h3>L0-L4 风险分级</h3>
+      <p>全自动无边界,风险越大汇报越大:读取静默、内部写入日志、外部只读通知、可逆外部写倒计时放行、不可逆操作阻塞等你批准。</p></div>
+    <div class="feat"><div class="ic">📚</div><h3>越用越聪明</h3>
+      <p>错题本随每次派单注入角色上下文;Memory Tree(Obsidian 兼容 vault)沉淀跨项目经验 —— 第二个项目吸取第一个项目的教训。</p></div>
+    <div class="feat"><div class="ic">🛰️</div><h3>宁死不降级</h3>
+      <p>模型挂了换通道不换模型(同模型多 Provider failover);全部通道不可用就挂起上报,绝不静默换模型丢失角色记忆。</p></div>
+    <div class="feat"><div class="ic">⛽</div><h3>成本实时追踪 + 熔断</h3>
+      <p>每个 token 入账:按角色、按模型、按任务实时聚合;单任务预算熔断,超限挂起上报。评估集自动生长,模型胜任度一表看清。</p></div>
+  </div>
+</section>
+
+<section id="cost">
+  <div class="sec-h"><h2>成本对比</h2><p>同样的活,团队干 vs 全用旗舰模型干</p></div>
+  <table>
+    <tr><th>任务类型</th><th>全用 Opus 5</th><th>CrewOS 团队</th><th>节省</th></tr>
+    <tr><td>写一个 feature(issue → PR)</td><td class="old">$5–10</td><td>$0.80–1.50</td><td class="save">85%</td></tr>
+    <tr><td>深度研究报告</td><td class="old">$3–5</td><td>$0.30–0.60</td><td class="save">88%</td></tr>
+    <tr><td>小红书文案</td><td class="old">$2–3</td><td>$0.10–0.20</td><td class="save">93%</td></tr>
+    <tr><td>日报提取 + 监控</td><td class="old">$1–2</td><td>$0.02–0.05</td><td class="save">97%</td></tr>
+  </table>
+</section>
+
+<section id="install">
+  <div class="sec-h"><h2>三分钟上岗</h2><p>与 Hermes / OpenClaw 同款安装体验,所有数据住在 ~/.crewos</p></div>
+  <pre><i># 1. 安装</i>
+<b>git clone https://github.com/spikesubingrui-design/CrewOS.git && cd CrewOS</b>
+<b>bash install.sh</b>
+
+<i># 2. 初始化(API keys 可全部回车跳过,稍后在看板配置)</i>
+<b>crewos onboard</b>
+
+<i># 3. 启动 Mission Control(自动打开浏览器)</i>
+<b>crewos start</b>
+
+<i># 4. 让 Claude Code 上岗当总指挥</i>
+<b>claude mcp add crewos -- crewos mcp</b></pre>
+  <div class="steps">
+    <div class="step"><div class="n">01</div><p>打开看板:轨道视图实时直播谁在干活、谁在审阅、谁挂了、钱花在哪。</p></div>
+    <div class="step"><div class="n">02</div><p>CONFIG 里给每个乘组换脑(换 LLM 不丢记忆)、设预算熔断、配飞书推送、编辑动作风险表与定时任务。</p></div>
+    <div class="step"><div class="n">03</div><p>对 Claude Code 说"帮我研究 X"——它按手册派单、审阅、复盘,风险动作先来问你。</p></div>
+  </div>
+</section>
+
+<footer>
+  CREWOS · MIT License · <a href="https://github.com/spikesubingrui-design/CrewOS">github.com/spikesubingrui-design/CrewOS</a><br>
+  贵模型做决策 · 便宜模型做执行 · 宁死不降级 · 风险越大汇报越大
+</footer>
+</main>
+
+<script>
+/* 星空 */
+const cvs=document.getElementById("stars"),ctx=cvs.getContext("2d");
+let stars=[],meteors=[];
+function starInit(){cvs.width=innerWidth;cvs.height=innerHeight;
+  stars=Array.from({length:Math.min(360,innerWidth/4)},()=>({
+    x:Math.random()*cvs.width,y:Math.random()*cvs.height,
+    r:Math.random()*1.3+.2,a:Math.random(),da:(Math.random()*.012+.003)*(Math.random()<.5?-1:1),
+    vx:-(Math.random()*.05+.01)}));}
+function starTick(){ctx.clearRect(0,0,cvs.width,cvs.height);
+  for(const s of stars){s.a+=s.da;if(s.a>1||s.a<.08)s.da*=-1;
+    s.x+=s.vx;if(s.x<0)s.x=cvs.width;
+    ctx.globalAlpha=Math.max(.05,Math.min(1,s.a));ctx.fillStyle="#cdd9ff";
+    ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,7);ctx.fill();}
+  if(Math.random()<.004)meteors.push({x:Math.random()*cvs.width,y:Math.random()*cvs.height*.4,l:0});
+  meteors=meteors.filter(m=>m.l<1);
+  for(const m of meteors){m.l+=.03;ctx.globalAlpha=1-m.l;ctx.strokeStyle="#9db8ff";ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(m.x+m.l*180,m.y+m.l*70);ctx.lineTo(m.x+m.l*180+26,m.y+m.l*70+10);ctx.stroke();}
+  ctx.globalAlpha=1;requestAnimationFrame(starTick);}
+starInit();starTick();addEventListener("resize",()=>{starInit();layout()});
+
+/* 模拟轨道 */
+const CREW=[["RECON-1","kimi-k2.6"],["WRITER-1","qwen3.7-max"],["CODER-1","codex-5.5"],
+            ["ANLYT-1","ds-v4-pro"],["BUILD-1","glm-5.1"],["CARGO-1","ds-flash"],["OPTIC-1","doubao-seed"]];
+const field=document.getElementById("sim-orbit"),$=s=>document.querySelector(s);
+let pos={},T=0;
+CREW.forEach(([cs,md],i)=>{
+  field.insertAdjacentHTML("beforeend",
+    `<div class="node" id="n${i}"><div class="core"></div><div class="cs">${cs}</div><div class="md">${md}</div></div>`);
+});
+function layout(){
+  const w=field.offsetWidth,h=field.offsetHeight;if(!w)return;
+  pos._m={cx:w/2,cy:h/2,r1:Math.min(w,h)*.30,r2:Math.min(w,h)*.44};
+  $("#cmd").style.left=pos._m.cx+"px";$("#cmd").style.top=pos._m.cy+"px";
+  $("#orbitsvg").innerHTML=`
+    <circle cx="${pos._m.cx}" cy="${pos._m.cy}" r="${pos._m.r1}" fill="none" stroke="rgba(150,180,255,.12)" stroke-dasharray="2 7"/>
+    <circle cx="${pos._m.cx}" cy="${pos._m.cy}" r="${pos._m.r2}" fill="none" stroke="rgba(150,180,255,.08)" stroke-dasharray="2 7"/>`;
+}
+function tick(){
+  T+=.0014;const m=pos._m;
+  if(m)CREW.forEach((c,i)=>{
+    const inner=i<4,r=inner?m.r1:m.r2;
+    const th=(inner?(i/4):((i-4)/3))*Math.PI*2+T*(inner?1:-.6);
+    const x=m.cx+r*Math.cos(th),y=m.cy+r*Math.sin(th)*.92;
+    const el=document.getElementById("n"+i);
+    el.style.left=x+"px";el.style.top=y+"px";pos[i]={x,y};
+  });
+  if(m)pos.ceo={x:m.cx,y:m.cy};
+  requestAnimationFrame(tick);
+}
+layout();tick();
+
+function pulse(a,b,ret){
+  if(!pos[a]||!pos[b])return;
+  const d=document.createElement("div");d.className="pulse-dot"+(ret?" ret":"");field.appendChild(d);
+  const A=pos[a],B=pos[b],t1=performance.now(),dur=800;
+  (function step(t){const k=Math.min(1,(t-t1)/dur),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+    d.style.left=A.x+(pos[b].x-A.x)*e+"px";d.style.top=A.y+(pos[b].y-A.y)*e+"px";
+    if(k<1)requestAnimationFrame(step);else d.remove();})(t1);
+}
+function engage(i,on){document.getElementById("n"+i).classList.toggle("engaged",on)}
+const tele=document.getElementById("tele");
+let cost=0;
+function line(cls,txt,c){
+  const t=new Date(),p=n=>String(n).padStart(2,"0");
+  if(c){cost+=c;$("#sim-cost").textContent="FUEL $"+cost.toFixed(4)}
+  tele.insertAdjacentHTML("beforeend",`<div class="tl"><span class="ts">${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}</span> ▸ <span class="${cls}">${txt}</span>${c?` <span class="cost">$${c.toFixed(4)}</span>`:""}</div>`);
+  while(tele.children.length>11)tele.firstChild.remove();
+}
+function cmdSt(s,rev){$("#cmd-st").textContent=s;$("#cmd").classList.toggle("reviewing",!!rev)}
+const ap=document.getElementById("sim-ap");
+function apCard(l4,title,sum){
+  ap.innerHTML=`<div class="apcard${l4?" l4":""}">
+    <span class="aptag">▮ ${l4?"L4 · HOLD FOR GO":"L3 · AUTO-GO COUNTDOWN"}</span>
+    <span style="margin-left:8px;font-weight:600">${title}</span>
+    <div style="color:#aebbd8;margin-top:6px">${sum}</div>
+    ${l4?"":'<div class="apbar"><i></i></div>'}
+    <div class="apbtns"><span>${l4?"GO — APPROVE":"GO NOW"}</span><span class="deny">${l4?"NO-GO — DENY":"ABORT"}</span></div></div>`;
+  if(!l4){const bar=ap.querySelector(".apbar i");let w=100;
+    const t=setInterval(()=>{w-=2.5;if(w<=0||!ap.contains(bar)){clearInterval(t);return}bar.style.width=w+"%"},150);}
+}
+/* 剧本循环 */
+const SCRIPT=[
+  [0,()=>{cmdSt("ANALYZING TASK");line("assign","USER → CDR · 新任务:写一篇小红书文案")}],
+  [1.6,()=>{cmdSt("UPLINK → RECON-1");pulse("ceo",0);engage(0,1);line("assign","CDR → RECON-1 · 搜集热点与数据")}],
+  [4.2,()=>{engage(0,0);pulse(0,"ceo",1);cmdSt("REVIEWING · ROUND 0",1);line("result","RECON-1 → CDR · 3 个热点 + 5 条数据,来源已附",0.011)}],
+  [6.4,()=>{cmdSt("UPLINK → WRITER-1");pulse("ceo",1);engage(1,1);line("assign","CDR → WRITER-1 · 基于研究创作文案 500-800 字")}],
+  [9.2,()=>{engage(1,0);pulse(1,"ceo",1);cmdSt("REVIEWING · ROUND 0",1);line("result","WRITER-1 → CDR · 文案 v1 完成",0.0027)}],
+  [11.4,()=>{cmdSt("REVIEW: REJECTED",1);pulse("ceo",1);line("review","CDR → WRITER-1 · 打回:hook 太弱,参考错题本用反差开头(自动写入错题本)")}],
+  [13.2,()=>{engage(1,1);cmdSt("UPLINK → WRITER-1 · R1");line("assign","CDR → WRITER-1 · 重写 hook:'我解雇了自己'式反差开头")}],
+  [16,()=>{engage(1,0);pulse(1,"ceo",1);cmdSt("REVIEWING · ROUND 1",1);line("result","WRITER-1 → CDR · v2 完成,hook 已强化",0.0027)}],
+  [18.2,()=>{cmdSt("MISSION COMPLETE");line("done","CDR → USER · 交付。总成本 $0.016,纯 Opus 约 $0.35,省 95%")}],
+  [19.6,()=>{cmdSt("DEBRIEF / RETROSPECT");line("retro","CDR · 复盘:writer 初稿 hook 弱 → 已计入错题本与 Memory Tree")}],
+  [21,()=>{apCard(false,"CARGO-1 · delete_old_files","申请清理 drafts/ 下 7 天前的旧草稿 — 60 秒无人反对自动放行")}],
+  [27,()=>{apCard(true,"WRITER-1 · publish_to_xiaohongshu","请求发布《一人公司招人记》— 不可逆操作,等待你批准")}],
+  [33,()=>{ap.innerHTML="";cmdSt("STANDING BY");line("done","USER · 已批准发布 — 任务归档,进入下一循环")}],
+];
+function loop(){
+  SCRIPT.forEach(([t,fn])=>setTimeout(fn,t*1000));
+  setTimeout(loop,36000);
+}
+setTimeout(loop,600);
+</script>
+</body>
+</html>

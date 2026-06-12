@@ -64,22 +64,29 @@ crewos -w /其他/工作区 start        # 多团队隔离(像 mmclaw -w)
 - 未登记的动作一律按 L3(60 秒倒计时)处理
 - 审批卡片在看板右下角:GO / NO-GO 一键裁决;CLI 用 `crewos approvals / approve <id> / deny <id>`
 
-## 越用越聪明(错题本)
+## 越用越聪明(错题本 + Memory Tree)
 
 - CC 审阅打回 → 打回原因自动写入该 agent 的 `memory/lessons.md`
-- CC 复盘 → `add_lesson` 写"错误 → 修正后的做法"
-- 错题本随每次派单注入该 agent 上下文,同样的坑不栽第二次
+- CC 复盘 → `add_lesson` 写"错误 → 修正后的做法";项目经验 `memory_write` 进 Memory Tree
+- 错题本随每次派单注入该 agent 上下文;Memory Tree 是 Obsidian 兼容 vault(直接打开 `~/.crewos/memory`),接新任务先 `memory_search` —— 第二个项目吸取第一个项目的教训
+
+## 通知与定时(Phase 2)
+
+- **飞书推送**:看板 CONFIG 贴上群机器人 webhook,交付/上报/熔断/审批请求实时推送(L0/L1 静默事件绝不外推);通用 webhook 同理
+- **cron 定时任务**:编辑 `config/crontab.yaml`(看板可改),标准 5 段 cron,改完即生效;每次触发就是一次派单,全程入台账受熔断保护;`crewos jobs` 查看
+- **视频理解**:`dispatch(agent="perceiver", media_url="<视频/图片直链>")` 走多模态消息(火山方舟 doubao 格式)
+- **评估集自动生长**:每个任务自动成为评估样本;看板 CREW PERFORMANCE / `crewos evals` / MCP `eval_report` 查各角色×模型的一次过率、平均轮次、上报数 —— 换模型前先看它
 
 ## 验收
 
 ```bash
-python3 -m pytest tests/   # 13 项:派单台账/failover/宕机上报/DLP/熔断/回放/风险分级/错题本
+python3 -m pytest tests/   # 21 项:派单台账/failover/宕机上报/DLP/熔断/回放/风险分级/错题本/cron/通知/记忆/多模态/评估
 ```
+
+## 宣传页
+
+`docs/index.html`(GitHub Pages)— 含循环播放的工作流模拟动画;正式看板无模拟入口,保持纯净。
 
 ## 安全(OpenClaw 138 CVE 教训)
 
 只绑 127.0.0.1 / key 隔离 / 档案编辑白名单防越权 / 出站全过 DLP / 预算熔断 / 模型全挂不静默换模型(挂起上报,交接需授权)
-
-## Phase 2 路线
-
-飞书网关(VPS)、cron 调度、Memory Tree + Obsidian vault、竞品视频自动拆解流水线、评估集自动生长、CC 归因复盘。

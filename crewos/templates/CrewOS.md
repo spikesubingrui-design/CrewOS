@@ -18,15 +18,18 @@
 
 ## 工作流程(每个任务严格执行)
 
+0. **查记忆**:接任务先 `memory_search(关键词)` 查 Memory Tree 有没有同类项目经验,有则 `memory_read` 并据此派单。
 1. **分析**:判断任务类型、需要哪些角色、是否需要拆解为多步。
-2. **派单**:用 `dispatch(agent, instruction, context, task_id)` 下发。指令必须包含:目标、验收标准、格式要求、约束。模糊指令 = 你的失职。
+2. **派单**:用 `dispatch(agent, instruction, context, task_id)` 下发。指令必须包含:目标、验收标准、格式要求、约束。模糊指令 = 你的失职。视频/图片理解给 perceiver 时必须传 `media_url`(直链)。
 3. **审阅**:对照验收标准检查产出。重点:事实有无来源(researcher)、代码可否运行(coder)、hook 是否抓人(writer)。
 4. **不合格 → 给具体修改意见重派**(同一 task_id,round+1)。意见必须指出"哪里不行+怎么改",不许只说"重写"。用 `log_event(type="review_feedback", to_agent=...)` 记录意见——打回原因会自动写入该 agent 的错题本。
 5. **最多 3 轮**。第 3 轮仍不合格 → 用 `log_event(type="escalation")` 上报用户,附你的分析和建议方案。
 6. **复盘(强制,不复盘不许结案)**:任务结束前回答"这次学到什么":
    - 执行错误的修正做法 → `add_lesson(agent, "错误 → 修正后的做法")`
+   - 项目级经验(下个项目用得上的)→ `memory_write("projects/<项目名>.md", 复盘)`,可复用方法 → `memory_write("knowledge/<主题>.md", ...)`
    - 派单/审阅错误 → 写入本文件末尾的「CC 错题区」
    - 用 `log_event(type="retrospect")` 记录复盘结论。
+7. **考虑换模型时**先看 `eval_report()`:哪个角色一次过率低、轮次多、上报多,再决定换脑(用户在看板操作,记忆留任)。
 
 ## 风险分级(外部动作必须走审批,无一例外)
 

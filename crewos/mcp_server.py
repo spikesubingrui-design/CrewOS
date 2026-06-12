@@ -21,6 +21,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from . import memory as memvault
 from .ledger import Ledger
 from .memory import append_lesson
 from .risk import RiskEngine
@@ -31,6 +32,7 @@ _router: Router | None = None
 _ledger: Ledger | None = None
 _risk: RiskEngine | None = None
 _agents_dir: Path | None = None
+_root: Path | None = None
 
 
 @mcp.tool()
@@ -45,14 +47,15 @@ def list_agents() -> str:
 @mcp.tool()
 def dispatch(agent: str, instruction: str, context: str = "",
              task_id: str = "", round: int = 0,
-             budget_usd: float = 0.0) -> str:
+             budget_usd: float = 0.0, media_url: str = "") -> str:
     """派单给指定 agent。instruction 必须含目标+验收标准+格式要求。
     task_id 留空则新建任务;重派(审阅不合格)时传原 task_id 并 round+1。
-    budget_usd 为 0 时使用默认任务预算上限。"""
+    budget_usd 为 0 时使用默认任务预算上限。
+    media_url:视频/图片直链(给 perceiver 做视频理解时必传,多模态消息格式)。"""
     try:
         result = _router.dispatch(
             agent, instruction, context=context, task_id=task_id,
-            round=round, budget_usd=budget_usd or None)
+            round=round, budget_usd=budget_usd or None, media_url=media_url)
         return json.dumps(result, ensure_ascii=False)
     except BudgetExceeded as e:
         return json.dumps({"error": "budget_exceeded", "detail": str(e),
@@ -115,6 +118,44 @@ def add_lesson(agent: str, lesson: str, task_id: str = "", round: int = 0) -> st
 
 
 @mcp.tool()
+def memory_search(query: str) -> str:
+    """检索 Memory Tree(跨项目永久记忆)。接新任务前必查:有没有同类项目经验。
+    query 用空格分隔关键词。返回命中文件与片段。"""
+    hits = memvault.vault_search(_root, query)
+    return json.dumps(hits or {"hint": "无命中。结案时记得用 memory_write 沉淀复盘。"},
+                      ensure_ascii=False)
+
+
+@mcp.tool()
+def memory_read(path: str) -> str:
+    """读取 Memory Tree 中的一个文件(相对 memory/ 的路径,如 projects/xxx.md)。"""
+    try:
+        return memvault.vault_read(_root, path)
+    except (FileNotFoundError, ValueError) as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def memory_write(path: str, content: str, mode: str = "append") -> str:
+    """写入 Memory Tree。项目复盘写 projects/<项目名>.md,可复用方法写 knowledge/<主题>.md。
+    复盘格式:背景 / 做了什么 / 踩了什么坑 / 下次怎么做。mode: append(默认)或 overwrite。"""
+    try:
+        f = memvault.vault_write(_root, path, content, mode=mode)
+    except ValueError as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+    _ledger.log("system", "status_update", "ceo", payload={
+        "summary": f"Memory Tree 更新: memory/{path}"})
+    return json.dumps({"ok": True, "file": str(f)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def eval_report() -> str:
+    """模型胜任度报表(评估集自动生长):各 agent×模型的任务数/一次过率/
+    平均轮次/上报数/成本。考虑换模型时先看这个。"""
+    return json.dumps(_ledger.eval_report(), ensure_ascii=False)
+
+
+@mcp.tool()
 def task_replay(task_id: str) -> str:
     """回放某任务的完整事件流(人类可读),含每步成本。"""
     return _ledger.replay(task_id)
@@ -127,7 +168,8 @@ def cost_report() -> str:
 
 
 def _bootstrap(root: Path, budget: float):
-    global _router, _ledger, _risk, _agents_dir
+    global _router, _ledger, _risk, _agents_dir, _root
+    _root = root
     _agents_dir = root / "agents"
     _ledger = Ledger(root / "data" / "ledger.db")
     _risk = RiskEngine(_agents_dir, _ledger)

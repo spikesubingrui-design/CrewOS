@@ -84,15 +84,31 @@ def load_agent(agents_dir: str | Path, name: str) -> AgentProfile:
     )
 
 
+def _media_part(url: str) -> dict:
+    """媒体 URL → OpenAI 兼容 content part(火山方舟 doubao 视频理解同此格式)。"""
+    ext = url.split("?")[0].rsplit(".", 1)[-1].lower()
+    if ext in ("jpg", "jpeg", "png", "webp", "gif", "bmp"):
+        return {"type": "image_url", "image_url": {"url": url}}
+    return {"type": "video_url", "video_url": {"url": url}}
+
+
+def _content_text(content) -> str:
+    """消息 content(str 或 multipart list)→ 纯文本,供 mock/计数用。"""
+    if isinstance(content, str):
+        return content
+    return " ".join(p.get("text", p.get("type", "")) for p in content)
+
+
 def _call_openai_compatible(channel: Channel, model: str, messages: list[dict],
                             temperature: float, max_tokens: int, timeout: int = 120) -> dict:
     """单通道调用。mock:// 通道用于无网络测试。"""
     if channel.endpoint.startswith("mock://"):
-        last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+        last_user = next((_content_text(m["content"]) for m in reversed(messages)
+                          if m["role"] == "user"), "")
         content = f"[mock:{model}@{channel.name}] 已处理任务: {last_user[:120]}"
         return {
             "content": content,
-            "tokens_in": sum(len(m["content"]) for m in messages) // 4,
+            "tokens_in": sum(len(_content_text(m["content"])) for m in messages) // 4,
             "tokens_out": len(content) // 4,
         }
 
@@ -154,8 +170,9 @@ class Router:
 
     def dispatch(self, name: str, instruction: str, context: str = "",
                  task_id: str = "", round: int = 0, max_tokens: int = 4096,
-                 budget_usd: float | None = None) -> dict:
-        """CC 派单入口。返回结果 + 成本明细;DLP 拦截时返回 redacted 文本。"""
+                 budget_usd: float | None = None, media_url: str = "") -> dict:
+        """CC 派单入口。返回结果 + 成本明细;DLP 拦截时返回 redacted 文本。
+        media_url:视频/图片直链,走多模态 content parts(perceiver 视频理解用)。"""
         agent = load_agent(self.agents_dir, name)
         task_id = task_id or self.ledger.new_task(instruction[:80], created_by="ceo")
         cap = budget_usd if budget_usd is not None else self.default_task_budget_usd
@@ -172,11 +189,14 @@ class Router:
         if agent.memory_digest:
             system += "\n\n## 你的角色记忆(历史经验,优先遵守)\n" + agent.memory_digest
         user = instruction + (f"\n\n## 上下文\n{context}" if context else "")
+        user_content = ([{"type": "text", "text": user}, _media_part(media_url)]
+                        if media_url else user)
         messages = [{"role": "system", "content": system},
-                    {"role": "user", "content": user}]
+                    {"role": "user", "content": user_content}]
 
         self.ledger.log(task_id, "task_assign", "ceo", name, round=round,
-                        payload={"summary": instruction[:200]})
+                        payload={"summary": instruction[:200],
+                                 **({"media_url": media_url} if media_url else {})})
 
         # 同模型多通道 failover
         result, used_channel, errors = None, None, []

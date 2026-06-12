@@ -1,0 +1,15 @@
+# 定时任务 — 标准 5 段 cron(分 时 日 月 周,本地时间)
+# 改完即生效(调度器每分钟热加载),enabled: false 的任务跳过。
+# 每次触发 = 一次派单,全程入台账,受预算熔断与 DLP 保护。
+jobs:
+  - name: daily-briefing
+    schedule: "30 8 * * *"
+    agent: researcher
+    instruction: "搜集过去 24 小时 AI agent 领域热点,输出 5 条简报,每条附来源链接"
+    enabled: false
+
+  - name: weekly-cost-digest
+    schedule: "0 9 * * 1"
+    agent: analyst
+    instruction: "用一段话总结上周团队成本结构与异常,给出一条优化建议"
+    enabled: false

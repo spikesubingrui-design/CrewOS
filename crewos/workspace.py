@@ -40,7 +40,7 @@ def ensure_workspace(ws: Path) -> list[str]:
         if not (ws / rel).exists():
             shutil.copy(tpl / rel, ws / rel)
             created.append(rel)
-    for sub in ("agents", "config"):
+    for sub in ("agents", "config", "memory"):
         src = tpl / sub
         for f in src.rglob("*"):
             if f.is_file():

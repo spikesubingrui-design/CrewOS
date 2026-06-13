@@ -38,6 +38,26 @@ def append_lesson(agents_dir: str | Path, agent: str, lesson: str,
     return f
 
 
+def _bigrams(text: str) -> set[str]:
+    t = re.sub(r"\s", "", text.lower())
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+def select_lessons(lessons_text: str, query: str, top_n: int = 3) -> str:
+    """错题本检索化:按与当前任务的字符二元组重合度选 top-N 条,防上下文稀释。
+    条目 ≤ top_n 时原样全给;表头(非条目行)始终保留。"""
+    lines = lessons_text.splitlines()
+    entries = [l for l in lines if l.lstrip().startswith("- ")]
+    header = "\n".join(l for l in lines if not l.lstrip().startswith("- ")).strip()
+    if len(entries) <= top_n:
+        return lessons_text.strip()
+    q = _bigrams(query)
+    scored = sorted(entries, key=lambda e: -len(q & _bigrams(e)))
+    picked = scored[:top_n]
+    kept = [e for e in entries if e in picked]   # 保持原有时序
+    return f"{header}\n(已按相关度选注 {top_n}/{len(entries)} 条)\n" + "\n".join(kept)
+
+
 # ---------- Memory Tree(Obsidian vault) ----------
 
 def _vault_path(root: str | Path, rel: str) -> Path:

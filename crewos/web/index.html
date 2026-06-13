@@ -142,6 +142,8 @@ select:focus,input:focus,textarea:focus{border-color:var(--blue)}
 .mission .mt{font-size:12px;line-height:1.5}
 .mission .mm{display:flex;justify-content:space-between;margin-top:9px;font-size:9.5px;color:var(--dim)}
 .mission .mm b{color:var(--amber);font-weight:400}
+.mop{color:var(--dim);margin-right:10px;cursor:pointer;letter-spacing:.06em}
+.mop:hover{color:var(--red)}
 
 /* ───── FLIGHT RECORDER ───── */
 #modal{display:none;position:fixed;inset:0;background:rgba(2,4,9,.88);z-index:100;padding:46px;backdrop-filter:blur(4px)}
@@ -288,6 +290,8 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
             <input type="text" id="s-feishu" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" style="width:100%"></div>
           <div class="frow"><label class="micro">通用 webhook(可选,POST JSON)</label>
             <input type="text" id="s-webhook" placeholder="https://…" style="width:100%"></div>
+          <div class="frow"><label class="micro">Access Token(可选 — 从局域网/隧道访问时必配,留空关闭)</label>
+            <input type="text" id="s-token" placeholder="设置后访问需带 ?token=…" style="width:100%"></div>
           <button class="btn" onclick="saveSettings()">COMMIT</button>
         </div>
       </div>
@@ -346,7 +350,10 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
 <div id="modal" onclick="if(event.target===this)this.classList.remove('open')">
   <div id="modal-box">
     <div class="panel-h"><span class="micro" id="modal-title">Flight Recorder</span>
-      <span id="modal-close" onclick="document.getElementById('modal').classList.remove('open')">✕</span></div>
+      <span style="display:flex;gap:14px;align-items:center">
+        <button class="btn" style="padding:6px 14px;font-size:9px" id="replay-btn">▶ REPLAY</button>
+        <span id="modal-close" onclick="document.getElementById('modal').classList.remove('open')">✕</span>
+      </span></div>
     <div id="modal-body"></div>
   </div>
 </div>
@@ -388,7 +395,14 @@ const CALLSIGN={coder:"CODER-1",writer:"WRITER-1",researcher:"RECON-1",analyst:"
   builder:"BUILD-1",runner:"CARGO-1",perceiver:"OPTIC-1"};
 const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
 const esc=s=>(s||"").replace(/</g,"&lt;");
-let agents=[],agentCost={},totalCost=0,nodePos={},orbitT=0;
+let agents=[],agentCost={},totalCost=0,nodePos={},orbitT=0,replayMode=false;
+
+/* 访问令牌:任意请求 401 → 询问 token 并以 ?token= 重进(服务端会种 cookie) */
+const _fetch=window.fetch.bind(window);
+window.fetch=async(...a)=>{const r=await _fetch(...a);
+  if(r.status===401){const t=prompt("Mission Control 已开启访问令牌,请输入 token:");
+    if(t)location.href="/?token="+encodeURIComponent(t);throw new Error("unauthorized")}
+  return r};
 
 $$(".tab").forEach(t=>t.onclick=()=>{
   $$(".tab").forEach(x=>x.classList.remove("active"));t.classList.add("active");
@@ -504,7 +518,7 @@ function setCrew(name,state,task){
 function handleEvent(ev){
   const p=JSON.parse(ev.payload||"{}"),brief=p.summary||p.title||p.reason||"";
   tele(ev,brief);
-  if(ev.cost_usd>0){totalCost+=ev.cost_usd;
+  if(ev.cost_usd>0&&!replayMode){totalCost+=ev.cost_usd;
     agentCost[ev.from_agent]=(agentCost[ev.from_agent]||0)+ev.cost_usd;
     $("#fuel").textContent="$"+totalCost.toFixed(4);
     const c=$("#mcost-"+ev.from_agent);if(c)c.textContent="$"+agentCost[ev.from_agent].toFixed(4);}
@@ -616,15 +630,57 @@ async function loadMissions(){
   $$("#board .body").forEach(c=>c.innerHTML="");
   for(const t of tasks){
     const col=$(`#board .mcol[data-s=${t.status}] .body`)||$(`#board .mcol[data-s=working] .body`);
+    const ops=(t.status==="done"?"":
+      (t.status==="blocked"?`<span class="mop" title="提额续跑" onclick="event.stopPropagation();taskBudget('${t.task_id}')">↥ 提额</span>`:"")+
+      `<span class="mop" title="取消任务" onclick="event.stopPropagation();taskCancel('${t.task_id}')">✕</span>`);
     col.insertAdjacentHTML("beforeend",`
       <div class="mission" onclick="recorder('${t.task_id}')">
         <div class="mt">${esc(t.title||"(untitled)")}</div>
-        <div class="mm"><span>${t.task_id} · R${t.rounds||0}</span><b>$${(t.cost||0).toFixed(4)}</b></div>
+        <div class="mm"><span>${t.task_id} · R${t.rounds||0}</span><span>${ops}<b>$${(t.cost||0).toFixed(4)}</b></span></div>
       </div>`);
   }
 }
+async function taskCancel(tid){
+  await fetch("/api/task/"+tid+"/cancel",{method:"POST"});
+  alert_("warn","CANCELLED",tid+" 已取消");loadMissions();
+}
+async function taskBudget(tid){
+  const v=prompt("新的任务预算上限(USD):","5");
+  if(!v||!(+v>0))return;
+  await fetch("/api/task/"+tid+"/budget",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({budget_usd:+v})});
+  alert_("info","BUDGET RAISED",`${tid} 提额至 $${+v} — 重派即续跑`);loadMissions();
+}
+/* 历史回放:把任务事件按时间轴在轨道上重演,不计入燃料 */
+let replayTimers=[];
+function replayStop(){
+  replayTimers.forEach(clearTimeout);replayTimers=[];replayMode=false;
+  const b=$("#replay-banner");if(b)b.remove();
+}
+async function replayTask(tid){
+  const evs=await (await fetch("/api/task/"+tid)).json();
+  if(!evs.length)return;
+  replayStop();replayMode=true;
+  $("#modal").classList.remove("open");
+  $$(".tab").forEach(x=>x.classList.remove("active"));
+  $('.tab[data-v="orbit"]').classList.add("active");
+  $$(".view").forEach(v=>v.classList.remove("active"));
+  $("#view-orbit").classList.add("active");layoutOrbit();
+  const banner=document.createElement("div");
+  banner.id="replay-banner";banner.className="alertbar info";
+  banner.style.cursor="pointer";banner.onclick=replayStop;
+  banner.innerHTML=`<span class="tag">▮ REPLAY</span><span>${tid} 回放中 — 点击停止</span>`;
+  $("#alerts").appendChild(banner);
+  let at=600;
+  evs.forEach((ev,i)=>{
+    const dt=i?Math.min(2.2,Math.max(.9,ev.ts-evs[i-1].ts)):0;
+    at+=dt*1000;
+    replayTimers.push(setTimeout(()=>{handleEvent(ev);if(i===evs.length-1)setTimeout(replayStop,2500)},at));
+  });
+}
 async function recorder(tid){
   const evs=await (await fetch("/api/task/"+tid)).json();
+  $("#replay-btn").onclick=()=>replayTask(tid);
   $("#modal-title").textContent="FLIGHT RECORDER · "+tid.toUpperCase();
   $("#modal-body").innerHTML=evs.map(ev=>{
     const p=JSON.parse(ev.payload||"{}");
@@ -651,13 +707,17 @@ async function loadSettings(){
   const s=await (await fetch("/api/settings")).json();
   $("#s-budget").value=s.default_task_budget_usd;$("#s-warn").value=s.monthly_warn_usd;
   $("#s-feishu").value=s.feishu_webhook||"";$("#s-webhook").value=s.webhook_url||"";
+  $("#s-token").value=s.dashboard_token||"";
   const bl=await (await fetch("/api/file?path=config/dlp_blocklist.txt")).json();
   if(bl.content!==undefined)$("#s-blocklist").value=bl.content;
 }
 async function saveSettings(){
+  const token=$("#s-token").value.trim();
   await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({default_task_budget_usd:+$("#s-budget").value,monthly_warn_usd:+$("#s-warn").value,
-      feishu_webhook:$("#s-feishu").value.trim(),webhook_url:$("#s-webhook").value.trim()})});
+      feishu_webhook:$("#s-feishu").value.trim(),webhook_url:$("#s-webhook").value.trim(),
+      dashboard_token:token})});
+  if(token)document.cookie="crewos_token="+encodeURIComponent(token)+"; SameSite=Strict";
   await fetch("/api/file",{method:"PUT",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({path:"config/dlp_blocklist.txt",content:$("#s-blocklist").value})});
   alert_("info","CONFIG","fuel limits / security / comms relay committed");
@@ -684,8 +744,11 @@ async function saveFile(){
   const p=$("#f-select").value;
   const r=await fetch("/api/file",{method:"PUT",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({path:p,content:$("#f-content").value})});
-  $("#f-status").textContent=(r.ok?"COMMITTED ":"FAILED ")+p;
-  if(r.ok)alert_("info","DOSSIER",p+" committed");
+  if(!r.ok){const e=await r.json().catch(()=>({}));
+    $("#f-status").textContent="REJECTED "+p;
+    alert_("err","INVALID CONFIG",e.detail||e.error||"保存失败");return}
+  $("#f-status").textContent="COMMITTED "+p;
+  alert_("info","DOSSIER",p+" committed");
 }
 /* ════════ LLM 配置(换脑不换人) ════════ */
 function llmInit(){

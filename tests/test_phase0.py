@@ -101,15 +101,25 @@ def test_dlp():
 
 
 def test_dlp_in_dispatch():
+    """v0.5 起入站 DLP 先拦:含密钥的指令直接拒发第三方模型。"""
+    import json as _json
+
+    from crewos.router import InboundSensitive
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         router = Router(make_workspace(tmp, MOCK_ONLY), Ledger(tmp / "l.db"))
-        # mock 通道会回显任务内容,故意让产出带密钥
-        r = router.dispatch("tester", "复述: sk-ant-abc123def456ghi789jkl012")
-        assert r["dlp_blocked"] and "sk-ant-abc123" not in r["content"]
-        types = [e["type"] for e in router.ledger.task_events(r["task_id"])]
-        assert "dlp_block" in types
-    print("✅ 派单链路中的 DLP 拦截")
+        tid = router.ledger.new_task("dlp 测试")
+        try:
+            router.dispatch("tester", "复述: sk-ant-abc123def456ghi789jkl012", task_id=tid)
+            assert False, "应拒发"
+        except InboundSensitive:
+            pass
+        blocks = [e for e in router.ledger.task_events(tid) if e["type"] == "dlp_block"]
+        assert blocks and _json.loads(blocks[0]["payload"])["direction"] == "inbound"
+        # 干净指令正常通过(出站扫描路径每次都在跑)
+        r = router.dispatch("tester", "写一句问候", task_id=tid)
+        assert not r["dlp_blocked"]
+    print("✅ 派单链路中的 DLP 拦截(入站拒发 + 出站扫描)")
 
 
 def test_budget_cap():

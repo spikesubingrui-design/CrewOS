@@ -23,11 +23,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from .cron import CronScheduler
+from .cron import CronScheduler, due
 from .ledger import Ledger
 from .notify import push as notify_push
 from .risk import RiskEngine
-from .router import AllChannelsDown, BudgetExceeded, Router, load_agent
+from .router import (AllChannelsDown, BudgetExceeded, InboundSensitive,
+                     Router, load_agent)
 
 ROOT = Path(".")
 app = FastAPI(title="CrewOS")
@@ -45,10 +46,33 @@ EDITABLE = re.compile(
 def _settings() -> dict:
     f = ROOT / "config" / "settings.yaml"
     base = {"default_task_budget_usd": 2.0, "monthly_warn_usd": 120.0,
-            "feishu_webhook": "", "webhook_url": ""}
+            "feishu_webhook": "", "webhook_url": "", "dashboard_token": ""}
     if f.exists():
         base.update(yaml.safe_load(f.read_text(encoding="utf-8")) or {})
     return base
+
+
+# ---------- 可选 token 认证(从局域网/隧道访问时必配) ----------
+
+def _authed(token: str, provided: str | None) -> bool:
+    return not token or provided == token
+
+
+@app.middleware("http")
+async def _auth_middleware(request, call_next):
+    token = str(_settings().get("dashboard_token") or "")
+    if token:
+        provided = (request.query_params.get("token")
+                    or request.headers.get("x-crewos-token")
+                    or request.cookies.get("crewos_token"))
+        if not _authed(token, provided):
+            return JSONResponse({"error": "unauthorized",
+                                 "hint": "携带 ?token=<dashboard_token> 访问一次即记住"},
+                                status_code=401)
+    resp = await call_next(request)
+    if token and request.query_params.get("token") == token:
+        resp.set_cookie("crewos_token", token, httponly=True, samesite="strict")
+    return resp
 
 
 def _blocklist() -> list[str]:
@@ -106,6 +130,11 @@ async def _safe_send(ws: WebSocket, msg: str):
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
+    token = str(_settings().get("dashboard_token") or "")
+    provided = ws.query_params.get("token") or ws.cookies.get("crewos_token")
+    if not _authed(token, provided):
+        await ws.close(code=4401)
+        return
     await ws.accept()
     _clients.add(ws)
     try:
@@ -113,6 +142,42 @@ async def ws_endpoint(ws: WebSocket):
             await ws.receive_text()
     except WebSocketDisconnect:
         _clients.discard(ws)
+
+
+# ---------- 后台线程:心跳探测 + 月度成本警戒 ----------
+
+def _heartbeat_loop():
+    """每 30s 探测全员通道,结果进缓存表;状态翻转事件由 Router 写台账。"""
+    while True:
+        try:
+            router = _router()
+            for name in router.list_agents():
+                router.heartbeat(name)
+        except Exception:
+            pass
+        time.sleep(30)
+
+
+def _monthly_watch_loop():
+    """月度成本越过警戒线时上报一次(每月只报一次,推送走通知网关)。"""
+    warned_month = ""
+    while True:
+        try:
+            t = time.localtime()
+            month = f"{t.tm_year}-{t.tm_mon:02d}"
+            month_start = time.mktime((t.tm_year, t.tm_mon, 1, 0, 0, 0, 0, 0, -1))
+            s = _settings()
+            total = _ledger().cost_report(since_ts=month_start)["total_usd"]
+            warn_at = float(s["monthly_warn_usd"])
+            if month != warned_month and warn_at > 0 and total >= warn_at:
+                warned_month = month
+                _ledger().log("system", "escalation", "router", "user", payload={
+                    "reason": f"本月成本 ${total:.2f} 已越过警戒线 ${warn_at:.2f}",
+                    "summary": f"月度警戒:{month} 已花 ${total:.2f}(警戒线 ${warn_at:.2f})。"
+                               f"请检查成本仪表盘,必要时调低任务预算或停用定时任务。"})
+        except Exception:
+            pass
+        time.sleep(600)
 
 
 # ---------- API ----------
@@ -137,7 +202,7 @@ def api_agents():
 
 @app.get("/api/heartbeat/{agent}")
 def api_heartbeat(agent: str):
-    return _router().heartbeat(agent)
+    return _router().heartbeat(agent, max_age=60)
 
 
 @app.get("/api/tasks")
@@ -206,10 +271,32 @@ async def api_dispatch(req: DispatchReq):
             budget_usd=req.budget_usd or None, media_url=req.media_url)
     try:
         return await asyncio.to_thread(run)
-    except (BudgetExceeded, AllChannelsDown) as e:
+    except (BudgetExceeded, AllChannelsDown, InboundSensitive) as e:
         return JSONResponse({"error": type(e).__name__, "detail": str(e)}, status_code=409)
     except Exception as e:
         return JSONResponse({"error": "dispatch_failed", "detail": str(e)}, status_code=500)
+
+
+class BudgetReq(BaseModel):
+    budget_usd: float
+
+
+@app.post("/api/task/{task_id}/budget")
+def api_task_budget(task_id: str, req: BudgetReq):
+    """提额续跑:写 budget_override 事件,熔断任务的下一次派单按新额度放行。"""
+    if req.budget_usd <= 0:
+        return JSONResponse({"error": "budget_must_be_positive"}, status_code=422)
+    _ledger().log(task_id, "budget_override", "user", payload={
+        "budget_usd": req.budget_usd,
+        "summary": f"预算提额至 ${req.budget_usd}(熔断解除,重派即续跑)"})
+    return {"ok": True, "task_id": task_id, "budget_usd": req.budget_usd}
+
+
+@app.post("/api/task/{task_id}/cancel")
+def api_task_cancel(task_id: str):
+    _ledger().log(task_id, "task_failed", "user", payload={
+        "summary": "用户取消任务"})
+    return {"ok": True, "task_id": task_id}
 
 
 @app.get("/api/evals")
@@ -253,7 +340,7 @@ def api_put_settings(body: dict):
     cur = _settings()
     cur.update({k: v for k, v in body.items()
                 if k in ("default_task_budget_usd", "monthly_warn_usd",
-                         "feishu_webhook", "webhook_url")})
+                         "feishu_webhook", "webhook_url", "dashboard_token")})
     f.write_text(yaml.safe_dump(cur, allow_unicode=True), encoding="utf-8")
     return cur
 
@@ -309,6 +396,52 @@ class FileReq(BaseModel):
     content: str
 
 
+def validate_config(path: str, content: str) -> str | None:
+    """配置文件保存前校验,返回错误信息;None = 通过。写坏 yaml 会让 agent 直接瘫痪。"""
+    if not path.endswith((".yaml", ".yml")):
+        return None
+    try:
+        doc = yaml.safe_load(content)
+    except yaml.YAMLError as e:
+        return f"YAML 语法错误: {str(e)[:160]}"
+    if path.endswith("provider.yaml"):
+        if not isinstance(doc, dict) or not doc.get("model"):
+            return "provider.yaml 需要 model 字段"
+        chs = doc.get("channels")
+        if not isinstance(chs, list) or not chs:
+            return "需要至少一条 channel"
+        for c in chs:
+            if not isinstance(c, dict) or not c.get("name") or not c.get("endpoint"):
+                return "每条 channel 需要 name 与 endpoint"
+        pricing = doc.get("pricing")
+        if (not isinstance(pricing, dict) or "input_per_m" not in pricing
+                or "output_per_m" not in pricing):
+            return "需要 pricing.input_per_m / output_per_m"
+    elif path.endswith("actions.yaml"):
+        actions = (doc or {}).get("actions")
+        if not isinstance(actions, dict):
+            return "需要 actions: 映射"
+        for k, v in actions.items():
+            if (not isinstance(v, dict) or not isinstance(v.get("risk"), int)
+                    or not 0 <= v["risk"] <= 4):
+                return f"动作 {k} 的 risk 必须是 0-4 的整数"
+    elif path.endswith("crontab.yaml"):
+        jobs = (doc or {}).get("jobs")
+        if jobs is None:
+            return None
+        if not isinstance(jobs, list):
+            return "jobs 必须是列表"
+        for j in jobs:
+            if (not isinstance(j, dict) or not j.get("name")
+                    or not j.get("agent") or not j.get("instruction")):
+                return "每个 job 需要 name / agent / instruction"
+            try:
+                due(str(j.get("schedule", "")), time.localtime())
+            except ValueError as e:
+                return f"job {j.get('name')}: {e}"
+    return None
+
+
 @app.put("/api/file")
 def api_put_file(req: FileReq):
     if not EDITABLE.match(req.path):
@@ -316,6 +449,9 @@ def api_put_file(req: FileReq):
     f = (ROOT / req.path).resolve()
     if not str(f).startswith(str(ROOT.resolve())):
         return JSONResponse({"error": "path_not_allowed"}, status_code=403)
+    err = validate_config(req.path, req.content)
+    if err:
+        return JSONResponse({"error": "invalid_config", "detail": err}, status_code=422)
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(req.content, encoding="utf-8")
     return {"ok": True, "path": req.path}
@@ -332,6 +468,8 @@ async def _startup():
     global _loop
     _loop = asyncio.get_running_loop()
     threading.Thread(target=_poll_events, daemon=True).start()
+    threading.Thread(target=_heartbeat_loop, daemon=True).start()
+    threading.Thread(target=_monthly_watch_loop, daemon=True).start()
     CronScheduler(ROOT, _router).start()
 
 

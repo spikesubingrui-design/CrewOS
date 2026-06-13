@@ -1,0 +1,22 @@
+# 发版到 PyPI:打 tag 即发布(vX.Y.Z)。
+# 一次性准备:在 pypi.org 项目设置里添加 Trusted Publisher
+#   (owner: spikesubingrui-design, repo: CrewOS, workflow: release.yml)。
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build && python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1

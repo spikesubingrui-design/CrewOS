@@ -77,10 +77,22 @@ crewos -w /其他/工作区 start        # 多团队隔离(像 mmclaw -w)
 - **视频理解**:`dispatch(agent="perceiver", media_url="<视频/图片直链>")` 走多模态消息(火山方舟 doubao 格式)
 - **评估集自动生长**:每个任务自动成为评估样本;看板 CREW PERFORMANCE / `crewos evals` / MCP `eval_report` 查各角色×模型的一次过率、平均轮次、上报数 —— 换模型前先看它
 
+## v0.5 引擎加固
+
+- **自动检查层**:派单附 `checks_json` 验收规格(字数/必含/违禁词/正则/链接数/JSON),产出先过机器检查,CEO 只看标红项 —— 审阅 token 再砍一半
+- **并行派单**:`dispatch_async` + `wait_task`,多个长任务真并行
+- **双向 DLP**:含敏感信息的指令直接拒发第三方模型(此前只扫产出)
+- **心跳后台化**:看板每 30s 后台探测并缓存,名册不再每次真发请求烧钱;通道掉线/恢复写台账
+- **错题本检索化**:按当前任务相关度选 top-3 注入,错题再多也不稀释上下文
+- **提额续跑**:熔断任务在看板一键提额(budget_override 事件,台账可审计);任务卡可直接取消
+- **月度警戒**:成本越线自动上报 + 推送(每月一次)
+- **访问令牌**:CONFIG 设 Access Token 后,局域网/隧道访问需带 token(本机 127.0.0.1 默认仍免配)
+- **配置校验**:看板保存 provider/actions/crontab.yaml 时先校验,写坏直接拒绝
+
 ## 验收
 
 ```bash
-python3 -m pytest tests/   # 21 项:派单台账/failover/宕机上报/DLP/熔断/回放/风险分级/错题本/cron/通知/记忆/多模态/评估
+python3 -m pytest tests/   # 29 项:派单台账/failover/宕机上报/DLP双向/熔断与提额/回放/风险分级/错题本/cron/通知/记忆/多模态/评估/检查层/心跳/校验
 ```
 
 ## 宣传页

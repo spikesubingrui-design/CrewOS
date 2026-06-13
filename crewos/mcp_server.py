@@ -21,11 +21,15 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+import threading
+import uuid
+
 from . import memory as memvault
+from .checks import parse_specs
 from .ledger import Ledger
 from .memory import append_lesson
 from .risk import RiskEngine
-from .router import AllChannelsDown, BudgetExceeded, Router
+from .router import AllChannelsDown, BudgetExceeded, InboundSensitive, Router
 
 mcp = FastMCP("crewos")
 _router: Router | None = None
@@ -33,37 +37,92 @@ _ledger: Ledger | None = None
 _risk: RiskEngine | None = None
 _agents_dir: Path | None = None
 _root: Path | None = None
+_async_tasks: dict[str, dict] = {}   # handle → {thread, result, error}
 
 
 @mcp.tool()
 def list_agents() -> str:
-    """列出团队全部 agent 及其通道健康状态(在线/离线)。派单前先看名册。"""
+    """列出团队全部 agent 及其通道健康状态(在线/离线)。派单前先看名册。
+    健康状态优先用 60 秒内缓存(Mission Control 后台每 30s 刷新)。"""
     out = {}
     for name in _router.list_agents():
-        out[name] = _router.heartbeat(name)
+        out[name] = _router.heartbeat(name, max_age=60)
     return json.dumps(out, ensure_ascii=False)
+
+
+def _do_dispatch(agent: str, instruction: str, context: str, task_id: str,
+                 round: int, budget_usd: float, media_url: str,
+                 checks_json: str) -> dict:
+    try:
+        return _router.dispatch(
+            agent, instruction, context=context, task_id=task_id,
+            round=round, budget_usd=budget_usd or None, media_url=media_url,
+            checks=parse_specs(checks_json))
+    except BudgetExceeded as e:
+        return {"error": "budget_exceeded", "detail": str(e),
+                "action_required": "上报用户,等待提额(看板任务卡可提额续跑)"}
+    except InboundSensitive as e:
+        return {"error": "inbound_sensitive", "detail": str(e),
+                "action_required": "移除指令/上下文中的敏感内容后重派"}
+    except AllChannelsDown as e:
+        return {"error": "all_channels_down", "detail": str(e),
+                "action_required": "上报用户:等待恢复 或 授权交接式换模型"}
 
 
 @mcp.tool()
 def dispatch(agent: str, instruction: str, context: str = "",
              task_id: str = "", round: int = 0,
-             budget_usd: float = 0.0, media_url: str = "") -> str:
-    """派单给指定 agent。instruction 必须含目标+验收标准+格式要求。
+             budget_usd: float = 0.0, media_url: str = "",
+             checks_json: str = "") -> str:
+    """派单给指定 agent(同步,等产出返回)。instruction 必须含目标+验收标准+格式要求。
     task_id 留空则新建任务;重派(审阅不合格)时传原 task_id 并 round+1。
     budget_usd 为 0 时使用默认任务预算上限。
-    media_url:视频/图片直链(给 perceiver 做视频理解时必传,多模态消息格式)。"""
-    try:
-        result = _router.dispatch(
-            agent, instruction, context=context, task_id=task_id,
-            round=round, budget_usd=budget_usd or None, media_url=media_url)
-        return json.dumps(result, ensure_ascii=False)
-    except BudgetExceeded as e:
-        return json.dumps({"error": "budget_exceeded", "detail": str(e),
-                           "action_required": "上报用户,等待提额"}, ensure_ascii=False)
-    except AllChannelsDown as e:
-        return json.dumps({"error": "all_channels_down", "detail": str(e),
-                           "action_required": "上报用户:等待恢复 或 授权交接式换模型"},
+    media_url:视频/图片直链(给 perceiver 做视频理解时必传)。
+    checks_json:验收规格 JSON 数组,产出先过机器检查,报告随结果返回——能写成硬指标的
+    验收都写进来,你只看标红项。如 '[{"type":"word_count","min":300,"max":1000},
+    {"type":"min_links","count":3},{"type":"must_include","values":["来源"]}]'。"""
+    return json.dumps(_do_dispatch(agent, instruction, context, task_id,
+                                   round, budget_usd, media_url, checks_json),
+                      ensure_ascii=False)
+
+
+@mcp.tool()
+def dispatch_async(agent: str, instruction: str, context: str = "",
+                   task_id: str = "", round: int = 0,
+                   budget_usd: float = 0.0, media_url: str = "",
+                   checks_json: str = "") -> str:
+    """异步派单:立即返回 handle 和 task_id,后台执行。
+    需要并行多个长任务时连续调用本工具,再用 wait_task 逐个收结果。
+    注意:handle 只活在本 MCP 进程内,重启后用 task_replay(task_id) 查台账。"""
+    tid = task_id or _ledger.new_task(instruction[:80], created_by="ceo")
+    handle = "h_" + uuid.uuid4().hex[:8]
+    slot: dict = {"result": None}
+
+    def run():
+        slot["result"] = _do_dispatch(agent, instruction, context, tid,
+                                      round, budget_usd, media_url, checks_json)
+
+    t = threading.Thread(target=run, daemon=True)
+    slot["thread"] = t
+    _async_tasks[handle] = slot
+    t.start()
+    return json.dumps({"handle": handle, "task_id": tid, "status": "running"},
+                      ensure_ascii=False)
+
+
+@mcp.tool()
+def wait_task(handle: str, timeout_seconds: float = 300) -> str:
+    """等待 dispatch_async 的结果。超时返回 status=running,可再次调用继续等。"""
+    slot = _async_tasks.get(handle)
+    if not slot:
+        return json.dumps({"error": "unknown_handle",
+                           "hint": "handle 不存在或 MCP 已重启,用 task_replay 查台账"},
                           ensure_ascii=False)
+    slot["thread"].join(timeout=timeout_seconds)
+    if slot["thread"].is_alive():
+        return json.dumps({"handle": handle, "status": "running"}, ensure_ascii=False)
+    _async_tasks.pop(handle, None)
+    return json.dumps(slot["result"], ensure_ascii=False)
 
 
 @mcp.tool()

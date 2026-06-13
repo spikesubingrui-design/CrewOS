@@ -22,8 +22,10 @@ from pathlib import Path
 
 import yaml
 
+from .checks import run_checks
 from .dlp import scan as dlp_scan
 from .ledger import Ledger
+from .memory import select_lessons
 
 
 @dataclass
@@ -45,10 +47,20 @@ class AgentProfile:
     price_in_per_m: float
     price_out_per_m: float
     role_prompt: str
-    memory_digest: str
+    memory_files: list[tuple[str, str]]   # (文件名, 内容)
     fallback_model: str = ""
     temperature: float = 0.7
     workspace: Path = field(default=Path("."))
+
+    def memory_digest(self, query: str = "") -> str:
+        """角色记忆注入文本。错题本按当前任务相似度选 top-3,其余文件截断拼接。"""
+        parts = []
+        for stem, text in self.memory_files:
+            if stem == "lessons" and query:
+                parts.append(f"### {stem}\n{select_lessons(text, query)}")
+            else:
+                parts.append(f"### {stem}\n{text.strip()[:2000]}")
+        return "\n\n".join(parts)
 
 
 class BudgetExceeded(Exception):
@@ -59,17 +71,20 @@ class AllChannelsDown(Exception):
     """同模型全部通道不可用 → 任务挂起,等待或走交接式换模型(需用户授权)。"""
 
 
+class InboundSensitive(Exception):
+    """指令/上下文含敏感信息,拒绝发往第三方模型。清理后重派。"""
+
+
 def load_agent(agents_dir: str | Path, name: str) -> AgentProfile:
     ws = Path(agents_dir) / name
     cfg = yaml.safe_load((ws / "provider.yaml").read_text(encoding="utf-8"))
     role = (ws / "role.md").read_text(encoding="utf-8")
 
-    # 角色记忆 v0:拼接 memory/ 下全部 md(Phase 2 升级为相似度检索 top-3)
     mem_dir = ws / "memory"
-    digest_parts = []
+    memory_files = []
     if mem_dir.exists():
         for f in sorted(mem_dir.glob("*.md")):
-            digest_parts.append(f"### {f.stem}\n{f.read_text(encoding='utf-8').strip()[:2000]}")
+            memory_files.append((f.stem, f.read_text(encoding="utf-8")))
     return AgentProfile(
         name=name,
         model=cfg["model"],
@@ -77,7 +92,7 @@ def load_agent(agents_dir: str | Path, name: str) -> AgentProfile:
         price_in_per_m=float(cfg["pricing"]["input_per_m"]),
         price_out_per_m=float(cfg["pricing"]["output_per_m"]),
         role_prompt=role,
-        memory_digest="\n\n".join(digest_parts),
+        memory_files=memory_files,
         fallback_model=cfg.get("fallback_model", ""),
         temperature=float(cfg.get("temperature", 0.7)),
         workspace=ws,
@@ -136,6 +151,17 @@ def _call_openai_compatible(channel: Channel, model: str, messages: list[dict],
     }
 
 
+HEARTBEAT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS heartbeats (
+    agent   TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    ok      INTEGER NOT NULL,
+    ts      REAL NOT NULL,
+    PRIMARY KEY (agent, channel)
+);
+"""
+
+
 class Router:
     def __init__(self, agents_dir: str | Path, ledger: Ledger,
                  default_task_budget_usd: float = 2.0,
@@ -144,6 +170,8 @@ class Router:
         self.ledger = ledger
         self.default_task_budget_usd = default_task_budget_usd
         self.dlp_blocklist = dlp_blocklist or []
+        ledger._conn.executescript(HEARTBEAT_SCHEMA)
+        ledger._conn.commit()
 
     def list_agents(self) -> list[str]:
         return sorted(
@@ -151,9 +179,21 @@ class Router:
             if d.is_dir() and (d / "provider.yaml").exists()
         )
 
-    def heartbeat(self, name: str) -> dict[str, bool]:
-        """探测各通道可用性(mock 通道恒为 True)。"""
+    def heartbeat(self, name: str, max_age: float = 0.0) -> dict[str, bool]:
+        """探测各通道可用性(mock 通道恒为 True)。
+        max_age>0 时优先用缓存(后台探测线程每 30s 刷新),避免每次名册都真发请求烧钱。
+        状态翻转(上线/掉线)写入台账。"""
         agent = load_agent(self.agents_dir, name)
+        conn = self.ledger._conn
+        if max_age > 0:
+            rows = {r["channel"]: bool(r["ok"]) for r in conn.execute(
+                "SELECT channel, ok FROM heartbeats WHERE agent=? AND ts>=?",
+                (name, time.time() - max_age))}
+            if all(ch.name in rows for ch in agent.channels):
+                return {ch.name: rows[ch.name] for ch in agent.channels}
+
+        prev = {r["channel"]: bool(r["ok"]) for r in conn.execute(
+            "SELECT channel, ok FROM heartbeats WHERE agent=?", (name,))}
         status = {}
         for ch in agent.channels:
             if ch.endpoint.startswith("mock://"):
@@ -166,18 +206,54 @@ class Router:
                 status[ch.name] = True
             except Exception:
                 status[ch.name] = False
+        now = time.time()
+        for ch_name, ok in status.items():
+            conn.execute(
+                "INSERT INTO heartbeats VALUES (?,?,?,?) "
+                "ON CONFLICT(agent,channel) DO UPDATE SET ok=excluded.ok, ts=excluded.ts",
+                (name, ch_name, int(ok), now))
+            if ch_name in prev and prev[ch_name] != ok:
+                self.ledger.log("system", "status_update", name, "user", payload={
+                    "summary": f"通道 {ch_name} {'恢复在线' if ok else '掉线'}",
+                    "channel": ch_name, "online": ok})
+        conn.commit()
         return status
+
+    def task_budget_override(self, task_id: str) -> float | None:
+        """最近一次提额事件的额度(看板「提额续跑」写入,append-only 友好)。"""
+        row = self.ledger._conn.execute(
+            "SELECT payload FROM events WHERE task_id=? AND type='budget_override' "
+            "ORDER BY ts DESC LIMIT 1", (task_id,)).fetchone()
+        if not row:
+            return None
+        try:
+            return float(json.loads(row["payload"]).get("budget_usd"))
+        except (ValueError, TypeError):
+            return None
 
     def dispatch(self, name: str, instruction: str, context: str = "",
                  task_id: str = "", round: int = 0, max_tokens: int = 4096,
-                 budget_usd: float | None = None, media_url: str = "") -> dict:
+                 budget_usd: float | None = None, media_url: str = "",
+                 checks: list[dict] | None = None) -> dict:
         """CC 派单入口。返回结果 + 成本明细;DLP 拦截时返回 redacted 文本。
-        media_url:视频/图片直链,走多模态 content parts(perceiver 视频理解用)。"""
+        media_url:视频/图片直链,走多模态 content parts(perceiver 视频理解用)。
+        checks:验收规格(见 checks.py),产出先过机器检查,报告随结果返回。"""
         agent = load_agent(self.agents_dir, name)
         task_id = task_id or self.ledger.new_task(instruction[:80], created_by="ceo")
-        cap = budget_usd if budget_usd is not None else self.default_task_budget_usd
 
-        # 预算熔断:超限挂起,升级为人工审批,绝不静默继续烧钱
+        # 入站 DLP:指令/上下文含敏感信息时拒发第三方模型,清理后才能重派
+        inbound = dlp_scan(instruction + "\n" + context,
+                           extra_blocklist=self.dlp_blocklist)
+        if inbound.blocked:
+            self.ledger.log(task_id, "dlp_block", "router", "user", payload={
+                "reason": "派单内容含敏感信息,已拒绝发往第三方模型",
+                "hits": inbound.hits, "agent": name, "direction": "inbound"})
+            raise InboundSensitive(
+                f"指令/上下文命中敏感项 {inbound.hits},已拒发。请移除后重派。")
+
+        # 预算上限:显式参数 > 提额事件 > 默认;超限挂起,绝不静默继续烧钱
+        cap = (budget_usd if budget_usd is not None
+               else self.task_budget_override(task_id) or self.default_task_budget_usd)
         spent = self.ledger.task_cost(task_id)
         if spent >= cap:
             self.ledger.log(task_id, "budget_block", "router", payload={
@@ -186,8 +262,9 @@ class Router:
                 f"任务 {task_id} 已花费 ${spent:.4f},达到上限 ${cap}。需人工提额后继续。")
 
         system = agent.role_prompt
-        if agent.memory_digest:
-            system += "\n\n## 你的角色记忆(历史经验,优先遵守)\n" + agent.memory_digest
+        digest = agent.memory_digest(query=instruction)
+        if digest:
+            system += "\n\n## 你的角色记忆(历史经验,优先遵守)\n" + digest
         user = instruction + (f"\n\n## 上下文\n{context}" if context else "")
         user_content = ([{"type": "text", "text": user}, _media_part(media_url)]
                         if media_url else user)
@@ -233,12 +310,17 @@ class Router:
                 "reason": "产出包含敏感信息,已脱敏并拦截原文",
                 "hits": scan_res.hits, "agent": name})
 
+        # 自动检查层:机器先验收硬指标,CEO 只看标红项
+        check_report = run_checks(content, checks or [])
+
         self.ledger.log(task_id, "task_result", name, "ceo", round=round,
                         model=agent.model, channel=used_channel,
                         tokens_in=result["tokens_in"], tokens_out=result["tokens_out"],
                         cost_usd=cost,
                         payload={"summary": content[:200],
-                                 "dlp_blocked": scan_res.blocked})
+                                 "dlp_blocked": scan_res.blocked,
+                                 "checks_passed": check_report["passed"],
+                                 "check_failures": check_report["failures"]})
 
         _r6 = lambda v: int(v * 1_000_000) / 1_000_000  # 参数 round 遮蔽了内置函数
         return {
@@ -253,4 +335,5 @@ class Router:
             "task_cost_usd": _r6(self.ledger.task_cost(task_id)),
             "dlp_blocked": scan_res.blocked,
             "dlp_warnings": scan_res.warnings,
+            "checks": check_report,
         }

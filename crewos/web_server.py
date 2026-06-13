@@ -27,8 +27,8 @@ from .cron import CronScheduler, due
 from .ledger import Ledger
 from .notify import push as notify_push
 from .risk import RiskEngine
-from .router import (AllChannelsDown, BudgetExceeded, InboundSensitive,
-                     Router, load_agent)
+from .router import (AgentPaused, AllChannelsDown, BudgetExceeded,
+                     InboundSensitive, Router, load_agent)
 
 ROOT = Path(".")
 app = FastAPI(title="CrewOS")
@@ -46,7 +46,9 @@ EDITABLE = re.compile(
 def _settings() -> dict:
     f = ROOT / "config" / "settings.yaml"
     base = {"default_task_budget_usd": 2.0, "monthly_warn_usd": 120.0,
-            "feishu_webhook": "", "webhook_url": "", "dashboard_token": ""}
+            "feishu_webhook": "", "webhook_url": "", "dashboard_token": "",
+            "watchdog_suspicious_minutes": 5.0, "watchdog_critical_minutes": 15.0,
+            "monthly_hard_usd": 0.0}
     if f.exists():
         base.update(yaml.safe_load(f.read_text(encoding="utf-8")) or {})
     return base
@@ -158,6 +160,20 @@ def _heartbeat_loop():
         time.sleep(30)
 
 
+def _watchdog_loop():
+    """每 60s 扫停滞任务(派单后久无产出),分级上报。便宜模型易跑飞,这层补单次 timeout 之外的整任务级停滞检测。"""
+    from .watchdog import Watchdog
+    while True:
+        try:
+            s = _settings()
+            Watchdog(_ledger(),
+                     suspicious_minutes=float(s["watchdog_suspicious_minutes"]),
+                     critical_minutes=float(s["watchdog_critical_minutes"])).tick()
+        except Exception:
+            pass
+        time.sleep(60)
+
+
 def _monthly_watch_loop():
     """月度成本越过警戒线时上报一次(每月只报一次,推送走通知网关)。"""
     warned_month = ""
@@ -175,6 +191,15 @@ def _monthly_watch_loop():
                     "reason": f"本月成本 ${total:.2f} 已越过警戒线 ${warn_at:.2f}",
                     "summary": f"月度警戒:{month} 已花 ${total:.2f}(警戒线 ${warn_at:.2f})。"
                                f"请检查成本仪表盘,必要时调低任务预算或停用定时任务。"})
+            # 月度硬上限:撞线把全员置 paused,阻断后续派单,直到人工恢复(钱做成硬刹车)
+            hard = float(s.get("monthly_hard_usd") or 0)
+            if hard > 0 and total >= hard:
+                router = _router()
+                for name in router.list_agents():
+                    if router.agent_status(name) == "active":
+                        router.pause_agent(
+                            name, f"本月成本 ${total:.2f} 撞月度硬上限 ${hard:.2f},全员熔断",
+                            by="budget")
         except Exception:
             pass
         time.sleep(600)
@@ -196,8 +221,27 @@ def api_agents():
             "fallback_model": a.fallback_model,
             "price_in": a.price_in_per_m, "price_out": a.price_out_per_m,
             "temperature": a.temperature,
+            "status": router.agent_status(name),
         })
     return out
+
+
+@app.post("/api/agent/{name}/pause")
+def api_agent_pause(name: str):
+    r = _router()
+    if name not in r.list_agents():
+        return JSONResponse({"error": "unknown_agent"}, status_code=404)
+    r.pause_agent(name, "看板手动暂停")
+    return {"ok": True, "agent": name, "status": "paused"}
+
+
+@app.post("/api/agent/{name}/resume")
+def api_agent_resume(name: str):
+    r = _router()
+    if name not in r.list_agents():
+        return JSONResponse({"error": "unknown_agent"}, status_code=404)
+    r.resume_agent(name)
+    return {"ok": True, "agent": name, "status": "active"}
 
 
 @app.get("/api/heartbeat/{agent}")
@@ -271,7 +315,7 @@ async def api_dispatch(req: DispatchReq):
             budget_usd=req.budget_usd or None, media_url=req.media_url)
     try:
         return await asyncio.to_thread(run)
-    except (BudgetExceeded, AllChannelsDown, InboundSensitive) as e:
+    except (BudgetExceeded, AllChannelsDown, InboundSensitive, AgentPaused) as e:
         return JSONResponse({"error": type(e).__name__, "detail": str(e)}, status_code=409)
     except Exception as e:
         return JSONResponse({"error": "dispatch_failed", "detail": str(e)}, status_code=500)
@@ -311,6 +355,31 @@ def api_jobs():
     return load_jobs(ROOT)
 
 
+# ---------- Paperclip 适配器:CrewOS 乘组作为 Paperclip 员工 ----------
+
+@app.get("/paperclip/manifest")
+def api_paperclip_manifest():
+    """Paperclip 配置 http adapter 时可读的发现信息:可派的乘组成员清单。"""
+    r = _router()
+    return {
+        "adapter": "crewos_http", "version": "1",
+        "execute_url": "/paperclip/execute",
+        "crew": [{"name": n, "status": r.agent_status(n)} for n in r.list_agents()],
+        "note": "在 Paperclip 里把 agent 的 adapterType 设为 http,指向 /paperclip/execute;"
+                "adapterConfig.crew_agent 选派给哪个乘组成员。",
+    }
+
+
+@app.post("/paperclip/execute")
+async def api_paperclip_execute(payload: dict):
+    """Paperclip 每次唤醒这名"员工"就 POST 一份 run-context;CrewOS 派单并按
+    AdapterExecutionResult 形状返回。受 dashboard_token 保护(中间件已统一处理)。"""
+    from .paperclip import execute
+    def run():
+        return execute(_router(), payload)
+    return await asyncio.to_thread(run)
+
+
 @app.get("/api/approvals")
 def api_approvals():
     return _risk().pending()
@@ -340,7 +409,9 @@ def api_put_settings(body: dict):
     cur = _settings()
     cur.update({k: v for k, v in body.items()
                 if k in ("default_task_budget_usd", "monthly_warn_usd",
-                         "feishu_webhook", "webhook_url", "dashboard_token")})
+                         "feishu_webhook", "webhook_url", "dashboard_token",
+                         "monthly_hard_usd", "watchdog_suspicious_minutes",
+                         "watchdog_critical_minutes")})
     f.write_text(yaml.safe_dump(cur, allow_unicode=True), encoding="utf-8")
     return cur
 
@@ -469,6 +540,7 @@ async def _startup():
     _loop = asyncio.get_running_loop()
     threading.Thread(target=_poll_events, daemon=True).start()
     threading.Thread(target=_heartbeat_loop, daemon=True).start()
+    threading.Thread(target=_watchdog_loop, daemon=True).start()
     threading.Thread(target=_monthly_watch_loop, daemon=True).start()
     CronScheduler(ROOT, _router).start()
 

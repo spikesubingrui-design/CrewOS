@@ -75,6 +75,10 @@ class InboundSensitive(Exception):
     """指令/上下文含敏感信息,拒绝发往第三方模型。清理后重派。"""
 
 
+class AgentPaused(Exception):
+    """目标 agent 已被暂停(预算硬刹车或人工暂停),拒绝派单直到恢复。"""
+
+
 def load_agent(agents_dir: str | Path, name: str) -> AgentProfile:
     ws = Path(agents_dir) / name
     cfg = yaml.safe_load((ws / "provider.yaml").read_text(encoding="utf-8"))
@@ -219,6 +223,41 @@ class Router:
         conn.commit()
         return status
 
+    # ---------- agent 暂停/恢复(预算硬刹车 + 人工) ----------
+
+    def agent_status(self, name: str) -> str:
+        """从台账推导 agent 状态。最近一次 agent_paused 事件的 action 决定 active/paused。"""
+        row = self.ledger._conn.execute(
+            "SELECT payload FROM events WHERE type='agent_paused' AND to_agent=? "
+            "ORDER BY ts DESC LIMIT 1", (name,)).fetchone()
+        if not row:
+            return "active"
+        try:
+            return "paused" if json.loads(row["payload"]).get("action") == "pause" else "active"
+        except (ValueError, TypeError):
+            return "active"
+
+    def pause_agent(self, name: str, reason: str, by: str = "user") -> None:
+        if self.agent_status(name) == "paused":
+            return
+        self.ledger.log("system", "agent_paused", by, name, payload={
+            "action": "pause", "summary": f"{name} 已暂停:{reason}"})
+
+    def resume_agent(self, name: str, by: str = "user") -> None:
+        if self.agent_status(name) == "active":
+            return
+        self.ledger.log("system", "agent_paused", by, name, payload={
+            "action": "resume", "summary": f"{name} 已恢复,可重新派单"})
+
+    def paused_agents(self) -> list[str]:
+        return [n for n in self.list_agents() if self.agent_status(n) == "paused"]
+
+    def _budget_warned(self, task_id: str) -> bool:
+        row = self.ledger._conn.execute(
+            "SELECT 1 FROM events WHERE task_id=? AND type='budget_warn' LIMIT 1",
+            (task_id,)).fetchone()
+        return row is not None
+
     def task_budget_override(self, task_id: str) -> float | None:
         """最近一次提额事件的额度(看板「提额续跑」写入,append-only 友好)。"""
         row = self.ledger._conn.execute(
@@ -241,6 +280,12 @@ class Router:
         agent = load_agent(self.agents_dir, name)
         task_id = task_id or self.ledger.new_task(instruction[:80], created_by="ceo")
 
+        # agent 暂停硬刹车:预算撞线或人工暂停时拒绝派单,直到显式恢复
+        if self.agent_status(name) == "paused":
+            self.ledger.log(task_id, "budget_block", "router", payload={
+                "reason": f"{name} 处于暂停态(预算硬刹车/人工),拒绝派单", "agent": name})
+            raise AgentPaused(f"{name} 已暂停,无法派单。请先 crewos resume {name} 或在看板恢复。")
+
         # 入站 DLP:指令/上下文含敏感信息时拒发第三方模型,清理后才能重派
         inbound = dlp_scan(instruction + "\n" + context,
                            extra_blocklist=self.dlp_blocklist)
@@ -260,6 +305,11 @@ class Router:
                 "reason": f"已花费 ${spent:.4f} ≥ 上限 ${cap}", "agent": name})
             raise BudgetExceeded(
                 f"任务 {task_id} 已花费 ${spent:.4f},达到上限 ${cap}。需人工提额后继续。")
+        # 软阈值 80%:接近上限先告警一次(不阻断),给 CEO 收尾的机会
+        if spent >= cap * 0.8 and not self._budget_warned(task_id):
+            self.ledger.log(task_id, "budget_warn", "router", "user", payload={
+                "summary": f"任务 {task_id} 已花 ${spent:.4f},达上限 ${cap} 的 80%——"
+                           f"建议尽快收尾,撞线将熔断。", "agent": name})
 
         system = agent.role_prompt
         digest = agent.memory_digest(query=instruction)

@@ -29,7 +29,8 @@ from .checks import parse_specs
 from .ledger import Ledger
 from .memory import append_lesson
 from .risk import RiskEngine
-from .router import AllChannelsDown, BudgetExceeded, InboundSensitive, Router
+from .router import (AgentPaused, AllChannelsDown, BudgetExceeded,
+                     InboundSensitive, Router)
 
 mcp = FastMCP("crewos")
 _router: Router | None = None
@@ -64,6 +65,9 @@ def _do_dispatch(agent: str, instruction: str, context: str, task_id: str,
     except InboundSensitive as e:
         return {"error": "inbound_sensitive", "detail": str(e),
                 "action_required": "移除指令/上下文中的敏感内容后重派"}
+    except AgentPaused as e:
+        return {"error": "agent_paused", "detail": str(e),
+                "action_required": "该 agent 已暂停(预算硬刹车/人工),上报用户决定是否恢复"}
     except AllChannelsDown as e:
         return {"error": "all_channels_down", "detail": str(e),
                 "action_required": "上报用户:等待恢复 或 授权交接式换模型"}

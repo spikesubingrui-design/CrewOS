@@ -14,12 +14,14 @@ import urllib.request
 NOTIFY_TYPES = {
     "task_done", "task_failed", "escalation", "dlp_block", "budget_block",
     "approval_request", "approval_decision", "failover", "risk_action",
+    "watchdog", "agent_paused",
 }
 
 _EMOJI = {
     "task_done": "✅", "task_failed": "❌", "escalation": "🆘",
     "dlp_block": "🔒", "budget_block": "⛽", "failover": "🔀",
     "approval_request": "⚠️", "approval_decision": "🟢", "risk_action": "📡",
+    "watchdog": "🐕", "agent_paused": "⏸️",
 }
 
 

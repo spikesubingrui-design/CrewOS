@@ -548,6 +548,9 @@ function handleEvent(ev){
       alert_(p.decision==="denied"?"warn":"info",
         p.decision==="auto_approved"?"AUTO CLEARED":p.decision==="denied"?"DENIED":"APPROVED",brief);break;
     case "lesson_saved":alert_("info","LESSON LOGGED",brief);break;
+    case "watchdog":alert_(p.level==="critical"?"err":"warn","WATCHDOG",brief);break;
+    case "budget_warn":alert_("warn","FUEL 80%",brief);break;
+    case "agent_paused":alert_("err","CREW PAUSED",brief);setCrew(ev.to_agent,"offline","");break;
   }
 }
 
@@ -597,7 +600,8 @@ async function loadApprovals(){
 function tele(ev,brief){
   const cls={task_assign:"assign",task_result:"result",review_feedback:"review",task_done:"done",
     retrospect:"retro",escalation:"alert",dlp_block:"alert",budget_block:"alert",failover:"review",
-    risk_action:"assign",approval_request:"review",approval_decision:"done",lesson_saved:"retro"}[ev.type]||"";
+    risk_action:"assign",approval_request:"review",approval_decision:"done",lesson_saved:"retro",
+    watchdog:"alert",budget_warn:"review",agent_paused:"alert"}[ev.type]||"";
   const d=new Date(ev.ts*1000),ts=`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   const route=ev.to_agent?`${(CALLSIGN[ev.from_agent]||ev.from_agent.toUpperCase())} → ${(CALLSIGN[ev.to_agent]||ev.to_agent.toUpperCase())}`
                          :(CALLSIGN[ev.from_agent]||ev.from_agent.toUpperCase());

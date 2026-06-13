@@ -95,7 +95,32 @@ def cmd_status(args):
     for name in router.list_agents():
         hb = router.heartbeat(name)
         dots = "  ".join(f"{'●' if ok else '○'} {ch}" for ch, ok in hb.items())
-        print(f"  {name:<12} {dots}")
+        paused = " [PAUSED]" if router.agent_status(name) == "paused" else ""
+        print(f"  {name:<12} {dots}{paused}")
+
+
+def cmd_pause(args):
+    router, _ = _router(_ws(args))
+    router.pause_agent(args.agent, "CLI 手动暂停")
+    print(f"  {args.agent} 已暂停。crewos resume {args.agent} 恢复。")
+
+
+def cmd_resume(args):
+    router, _ = _router(_ws(args))
+    router.resume_agent(args.agent)
+    print(f"  {args.agent} 已恢复。")
+
+
+def cmd_doctor(args):
+    from .doctor import diagnose
+    rows = diagnose(_router(_ws(args))[1])
+    if not rows:
+        print("  ✓ 无停工/异常任务,一切正常。")
+        return
+    for r in rows:
+        print(f"  [{r['severity']}] {r['task_id']} — {r['cause']}\n      {r['detail']}")
+        if r.get("suggestion"):
+            print(f"      → {r['suggestion']}")
 
 
 def cmd_cost(args):
@@ -144,6 +169,31 @@ def cmd_evals(args):
               f"{r['cost_usd']:.4f}")
 
 
+def cmd_eval_behavior(args):
+    """离线行为评估:每个 agent 用自己绑定的模型跑一遍合规用例,看谁稳。"""
+    from .behavioral import load_cases, run_suite
+    from .router import load_agent
+    ws = _ws(args)
+    cases = load_cases(args.cases)
+    models = []
+    for name in sorted(d.name for d in (ws / "agents").iterdir()
+                       if d.is_dir() and (d / "provider.yaml").exists()):
+        a = load_agent(ws / "agents", name)
+        if not a.channels:
+            continue
+        ch = a.channels[0]
+        models.append({"name": name, "model": a.model,
+                       "endpoint": ch.endpoint, "key_env": ch.key_env})
+    print(f"  跑 {len(cases)} 个行为用例 × {len(models)} 个模型(用各 agent 首选通道)…\n")
+    rep = run_suite(models, cases)
+    print(f"  {'AGENT':<12}{'MODEL':<22}{'合规率':<8}{'通过/总'}")
+    for name, r in rep["models"].items():
+        print(f"  {name:<12}{r['model']:<22}{r['compliance_rate']*100:>5.0f}%   {r['passed']}/{r['total']}")
+        for cid, cr in r["cases"].items():
+            if not cr["passed"]:
+                print(f"       ✗ {cid}: {'; '.join(cr['failures'])[:80]}")
+
+
 def cmd_approvals(args):
     pending = _risk_engine(_ws(args)).pending()
     if not pending:
@@ -181,6 +231,14 @@ def main():
 
     sub.add_parser("status", help="乘组与通道健康").set_defaults(fn=cmd_status)
     sub.add_parser("cost", help="成本报表").set_defaults(fn=cmd_cost)
+    sub.add_parser("doctor", help="诊断停工/异常任务(--why-stopped)").set_defaults(fn=cmd_doctor)
+
+    s = sub.add_parser("pause", help="暂停某 agent(阻断派单)")
+    s.add_argument("agent")
+    s.set_defaults(fn=cmd_pause)
+    s = sub.add_parser("resume", help="恢复某 agent")
+    s.add_argument("agent")
+    s.set_defaults(fn=cmd_resume)
 
     s = sub.add_parser("replay", help="任务回放")
     s.add_argument("task_id")
@@ -192,7 +250,10 @@ def main():
     s.set_defaults(fn=cmd_dispatch)
 
     sub.add_parser("jobs", help="定时任务列表(crontab.yaml)").set_defaults(fn=cmd_jobs)
-    sub.add_parser("evals", help="模型胜任度报表").set_defaults(fn=cmd_evals)
+    sub.add_parser("evals", help="模型胜任度报表(线上遥测)").set_defaults(fn=cmd_evals)
+    s = sub.add_parser("eval-behavior", help="离线行为评估(派真单前测合规率)")
+    s.add_argument("--cases", default="", help="自定义用例 yaml(默认内置 5 例)")
+    s.set_defaults(fn=cmd_eval_behavior)
     sub.add_parser("approvals", help="待审批动作(L3/L4)").set_defaults(fn=cmd_approvals)
     s = sub.add_parser("approve", help="批准动作")
     s.add_argument("approval_id")

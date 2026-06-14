@@ -616,7 +616,8 @@ def api_put_agent(name: str, cfg: AgentCfg):
 class BindReq(BaseModel):
     model: str
     provider_id: str
-    fallback_model: str = ""
+    fallback_model: str | None = None   # None=保留原值;"" 表示清空
+    temperature: float | None = None    # None=保留原值
     add_failover: bool = True   # 非 openrouter 时自动追加 openrouter 备用通道
 
 
@@ -640,9 +641,11 @@ def api_bind_agent(name: str, req: BindReq):
     doc = {
         "model": req.model,
         "channels": channels,
-        "fallback_model": req.fallback_model or (cur or {}).get("fallback_model", ""),
+        "fallback_model": (req.fallback_model if req.fallback_model is not None
+                           else (cur or {}).get("fallback_model", "")),
         "pricing": (cur or {}).get("pricing", {"input_per_m": 1.0, "output_per_m": 2.0}),
-        "temperature": (cur or {}).get("temperature", 0.7),
+        "temperature": (req.temperature if req.temperature is not None
+                        else (cur or {}).get("temperature", 0.7)),
     }
     f.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
     _ledger().log("system", "status_update", "user", name, payload={

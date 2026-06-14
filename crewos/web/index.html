@@ -210,6 +210,10 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
 .rc-key.show{display:grid}
 .rc-key input{font-size:11.5px;padding:8px 10px}
 .rc-keynote{font-size:9.5px;color:var(--dim);margin-top:6px}
+.rc-morelink{color:var(--dim);cursor:pointer;margin-top:9px;display:inline-block}
+.rc-morelink:hover{color:var(--ice)}
+.rc-more{display:none;grid-template-columns:2fr 1fr;gap:10px;margin-top:8px}
+.rc-more.show{display:grid}
 @media(max-width:680px){.rc-grid{grid-template-columns:1fr 1fr}}
 
 /* 供应商面板 */
@@ -678,6 +682,8 @@ const I18N={
   orbit_size:{zh:"节点大小",en:"Node size"},
   size_uniform:{zh:"均匀",en:"Uniform"},size_tasks:{zh:"按任务数",en:"By tasks"},
   size_cost:{zh:"按成本",en:"By cost"},size_tokens:{zh:"按 token",en:"By tokens"},
+  more_opts:{zh:"⋯ 更多(备用模型 / 温度)",en:"⋯ More (fallback / temperature)"},
+  fb_model:{zh:"备用模型(交接,需授权才启用)",en:"Fallback model (handoff, needs approval)"},
 };
 function t(k){return (I18N[k]||{})[LANG]||(I18N[k]||{}).en||k}
 function applyI18n(){
@@ -1385,11 +1391,20 @@ function provOptions(sel){
   return order.filter(x=>g[x]).map(x=>`<optgroup label="${x}">`+g[x].map(p=>
     `<option value="${p.id}"${p.id===sel?" selected":""}>${p.key_set?"✓ ":""}${esc(p.name)}</option>`).join("")+`</optgroup>`).join("");
 }
-function roleCard(key,name,role,model,provId,withRec){
+function roleCard(key,name,role,model,provId,withRec,fb,temp){
   const p=provById(provId);
   const chip=p?(p.key_set?`<span class="chip ok rc-status">✓ ${esc(p.name.split(" ")[0])} key</span>`
                         :`<span class="chip no rc-status">缺 ${esc(p.name.split(" ")[0])} key</span>`)
               :`<span class="chip no rc-status">未选供应商</span>`;
+  // 非必需项(备用模型/温度)默认折叠 —— 不是让模型跑起来的关键
+  const more=withRec?`
+    <div class="rc-morelink micro" onclick="rcMore('${key}')" id="rcml-${key}" data-i18n="more_opts">⋯ 更多(备用模型 / 温度)</div>
+    <div class="rc-more" id="rcmore-${key}">
+      <div class="frow" style="margin:0"><label class="micro" data-i18n="fb_model">备用模型(交接,需授权才启用)</label>
+        <input type="text" id="rcf-${key}" value="${esc(fb||"")}" placeholder="留空 = 无"></div>
+      <div class="frow" style="margin:0"><label class="micro">Temp</label>
+        <input type="number" id="rct-${key}" value="${temp!=null?temp:0.7}" step="0.1" min="0" max="2"></div>
+    </div>`:"";
   return `<div class="role-card ${key==='__ceo__'?'ceo':''}" id="rc-${key}">
     <div class="rc-top"><span class="rc-name">${esc(name)}</span><span class="rc-role">${esc(role)}</span>${chip}</div>
     <div class="rc-grid">
@@ -1403,8 +1418,11 @@ function roleCard(key,name,role,model,provId,withRec){
       <button class="btn" onclick="roleSaveKey('${key}')">保存 key</button>
     </div>
     <div class="rc-keynote" id="rckn-${key}"></div>
+    ${more}
   </div>`;
 }
+function rcMore(key){const m=$("#rcmore-"+key);m.classList.toggle("show");
+  $("#rcml-"+key).textContent=m.classList.contains("show")?"⋯ 收起":t("more_opts");}
 async function renderCrewSetup(){
   const box=$("#crew-setup");if(!box)return;
   _ceoCfg=await (await fetch("/api/settings")).json();
@@ -1412,7 +1430,8 @@ async function renderCrewSetup(){
                     _ceoCfg.ceo_model,_ceoCfg.ceo_provider,false);
   for(const a of agents){
     const p=roleProvider(a);
-    html+=roleCard(a.name,(CALLSIGN[a.name]||a.name),(CREW_BLURB[a.name]||""),a.model,p?p.id:"",true);
+    html+=roleCard(a.name,(CALLSIGN[a.name]||a.name),(CREW_BLURB[a.name]||""),a.model,p?p.id:"",true,
+                   a.fallback_model,a.temperature);
   }
   box.innerHTML=html;
   const keyed=providers.filter(x=>x.key_set).length;
@@ -1445,8 +1464,12 @@ async function roleSave(key){
       body:JSON.stringify({ceo_model:model,ceo_provider:pid})});
     if(r.ok)alert_("info","CEO",`总指挥 → ${model} @ ${provById(pid)?.name||pid}`);
   }else{
+    const body={model,provider_id:pid};
+    const fb=$("#rcf-"+key),tp=$("#rct-"+key);   // 折叠的非必需项,有才发
+    if(fb)body.fallback_model=fb.value.trim();
+    if(tp&&tp.value!=="")body.temperature=+tp.value;
     const r=await fetch("/api/agent/"+key+"/bind",{method:"PUT",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model,provider_id:pid})});
+      body:JSON.stringify(body)});
     if(!r.ok){const e=await r.json();alert_("err","CONFIG",e.detail||e.error||"失败");return}
     alert_("info","ASSIGNMENT",`${CALLSIGN[key]||key} → ${model} @ ${provById(pid)?.name||pid}`);
     agents=await (await fetch("/api/agents")).json();

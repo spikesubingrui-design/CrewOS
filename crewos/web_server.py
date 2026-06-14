@@ -135,7 +135,9 @@ def _poll_events():
                 for ws in list(_clients):
                     if _loop:
                         asyncio.run_coroutine_threadsafe(_safe_send(ws, msg), _loop)
-                notify_push(settings, dict(r))
+                # webhook 推送放后台线程:慢的飞书/webhook 不能卡住 0.8s 的实时广播循环
+                threading.Thread(target=notify_push, args=(settings, dict(r)),
+                                 daemon=True).start()
         except Exception as exc:   # 不要静默吞掉:打到 stderr 便于排查事件投递故障
             print(f"[poll_events] {type(exc).__name__}: {exc}", file=sys.stderr)
 

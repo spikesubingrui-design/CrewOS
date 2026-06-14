@@ -103,8 +103,12 @@ def dispatch_async(agent: str, instruction: str, context: str = "",
     slot: dict = {"result": None}
 
     def run():
-        slot["result"] = _do_dispatch(agent, instruction, context, tid,
-                                      round, budget_usd, media_url, checks_json)
+        try:
+            slot["result"] = _do_dispatch(agent, instruction, context, tid,
+                                          round, budget_usd, media_url, checks_json)
+        except Exception as e:   # 别让线程崩了后 wait_task 只拿到 null,无从知道为啥
+            slot["result"] = {"error": "dispatch_crashed",
+                              "detail": f"{type(e).__name__}: {str(e)[:300]}"}
 
     t = threading.Thread(target=run, daemon=True)
     slot["thread"] = t

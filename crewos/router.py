@@ -342,8 +342,9 @@ class Router:
             raise InboundSensitive(
                 f"指令/上下文命中敏感项 {inbound.hits},已拒发。请移除后重派。")
 
-        # 预算上限:显式参数 > 提额事件 > 默认;超限挂起,绝不静默继续烧钱
-        cap = (budget_usd if budget_usd is not None
+        # 预算上限:显式正数参数 > 提额事件 > 默认;超限挂起,绝不静默继续烧钱
+        # (budget_usd<=0 视为"未指定"而非"零上限",避免把整单卡死)
+        cap = (budget_usd if (budget_usd is not None and budget_usd > 0)
                else self.task_budget_override(task_id) or self.default_task_budget_usd)
         spent = self.ledger.task_cost(task_id)
         if spent >= cap:

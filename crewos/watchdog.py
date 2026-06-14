@@ -40,6 +40,9 @@ def scan_stalled(ledger: Ledger, suspicious_s: float, critical_s: float,
         last_assign = next((e for e in reversed(evs) if e["type"] == "task_assign"), None)
         if last_assign is None:
             continue
+        # CEO 编排的首个 user→ceo 派单只是规划占位,不是发给执行成员;规划慢不算停滞
+        if last_assign["to_agent"] in ("ceo", "user", "system", ""):
+            continue
         progressed = any(e["ts"] > last_assign["ts"] and e["type"] in TERMINAL_OR_PROGRESS
                          for e in evs)
         if progressed:

@@ -53,12 +53,18 @@ def due(expr: str, t: time.struct_time) -> bool:
         raise ValueError(f"cron 表达式必须 5 段: {expr!r}")
     minute, hour, dom, month, dow = fields
     wday = (t.tm_wday + 1) % 7  # struct_time 周一=0 → cron 周日=0
+    dom_match = t.tm_mday in _parse_field(dom, 1, 31)
+    dow_match = (wday in _parse_field(dow, 0, 7)
+                 or (wday == 0 and 7 in _parse_field(dow, 0, 7)))
+    # 标准 cron 语义:dom 和 dow 都非 * 时取「或」(任一命中即可);否则各字段「与」
+    if dom.strip() != "*" and dow.strip() != "*":
+        day_match = dom_match or dow_match
+    else:
+        day_match = dom_match and dow_match
     return (t.tm_min in _parse_field(minute, 0, 59)
             and t.tm_hour in _parse_field(hour, 0, 23)
-            and t.tm_mday in _parse_field(dom, 1, 31)
             and t.tm_mon in _parse_field(month, 1, 12)
-            and (wday in _parse_field(dow, 0, 7)
-                 or (wday == 0 and 7 in _parse_field(dow, 0, 7))))
+            and day_match)
 
 
 def load_jobs(root: Path) -> list[dict]:

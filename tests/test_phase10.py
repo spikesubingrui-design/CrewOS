@@ -180,3 +180,39 @@ def test_gbrain_bin_rejects_path_separators(monkeypatch):
     monkeypatch.setattr(umemory.subprocess, "run",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("不该执行带路径的 bin")))
     assert umemory.recall("x", {"u_memory_enabled": True, "u_gbrain_bin": "/tmp/evil.sh"}) == ""
+
+
+# ── v0.14.4:bug 修复(夜间评审 Batch D) ──
+def test_cron_dom_dow_or_semantics():
+    """dom 和 dow 都非 * 时取「或」(标准 cron 语义)。"""
+    import time as _t
+    from crewos.cron import due
+    # 2026-06-15 是周一(dow=1)。表达式:每月 1 号 或 每周一 的 09:00。
+    monday_15th = _t.struct_time((2026, 6, 15, 9, 0, 0, 0, 166, -1))  # 周一,非 1 号
+    first_of_month = _t.struct_time((2026, 7, 1, 9, 0, 0, 2, 182, -1))  # 周三,1 号
+    rand_day = _t.struct_time((2026, 6, 17, 9, 0, 0, 2, 168, -1))  # 周三,17 号
+    expr = "0 9 1 * 1"   # 1 号 或 周一
+    assert due(expr, monday_15th) is True     # 周一命中(OR)
+    assert due(expr, first_of_month) is True  # 1 号命中(OR)
+    assert due(expr, rand_day) is False       # 都不中
+    # 只有 dom 受限时仍是 AND 行为(每天 9:00 → 任意天命中)
+    assert due("0 9 * * *", rand_day) is True
+
+
+def test_budget_zero_treated_as_unset():
+    """budget_usd<=0 视为未指定,用默认上限,不把整单卡死。"""
+    from crewos.router import Router
+    from crewos.ledger import Ledger
+    from crewos import router as routermod
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        # 复用 test_phase9 的 mock 工作区构造
+        for n in ("writer",):
+            (tmp / "agents" / n / "memory").mkdir(parents=True)
+            (tmp / "agents" / n / "role.md").write_text("# w", encoding="utf-8")
+            (tmp / "agents" / n / "provider.yaml").write_text(
+                'model: "m"\nchannels:\n  - {name: mock, endpoint: "mock://", key_env: ""}\n'
+                'pricing: {input_per_m: 1.0, output_per_m: 2.0}\n', encoding="utf-8")
+        r = Router(tmp / "agents", Ledger(tmp / "l.db"), default_task_budget_usd=2.0)
+        out = r.dispatch("writer", "做点事", budget_usd=0)   # 0 不该当成零上限熔断
+        assert out["content"] and "mock" in out["content"]

@@ -131,6 +131,26 @@ def cmd_cost(args):
     print(json.dumps(ledger.cost_report(), ensure_ascii=False, indent=2))
 
 
+def cmd_memory(args):
+    """查看 U 第二大脑连接状态;--recall <词> 测试知识图召回。"""
+    from . import umemory
+    ws = _ws(args)
+    sf = Path(ws) / "config" / "settings.yaml"
+    settings = {}
+    if sf.exists():
+        import yaml as _yaml
+        settings = _yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+    st = umemory.status(settings)
+    ok = lambda b: "✓" if b else "✗"
+    print(f"  U 第二大脑:{'已连接' if st['connected'] else '未连接'}(enabled={st['enabled']})")
+    print(f"  {ok(st['hot_ok'])} HOT 工作记忆库   {st['hot_dir']}")
+    print(f"  {ok(st['wiki_ok'])} WARM 永久知识图  {st['wiki_dir']}")
+    print(f"  {ok(st['gbrain_ok'])} gbrain 召回引擎  {st['gbrain']}")
+    if args.recall:
+        print(f"\n  ── gbrain 召回「{args.recall}」──")
+        print(umemory.recall(args.recall, settings) or "  (无相关记忆)")
+
+
 def cmd_replay(args):
     _, ledger = _router(_ws(args))
     print(ledger.replay(args.task_id))
@@ -234,6 +254,9 @@ def main():
 
     sub.add_parser("status", help="乘组与通道健康").set_defaults(fn=cmd_status)
     sub.add_parser("cost", help="成本报表").set_defaults(fn=cmd_cost)
+    s = sub.add_parser("memory", help="U 第二大脑连接状态(--recall 测召回)")
+    s.add_argument("--recall", default="", help="测试从 U 知识图召回某主题")
+    s.set_defaults(fn=cmd_memory)
     sub.add_parser("doctor", help="诊断停工/异常任务(--why-stopped)").set_defaults(fn=cmd_doctor)
 
     s = sub.add_parser("pause", help="暂停某 agent(阻断派单)")

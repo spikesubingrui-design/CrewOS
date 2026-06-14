@@ -18,6 +18,7 @@ import json
 import re
 from pathlib import Path
 
+from . import umemory
 from .router import Channel, _call_openai_compatible
 
 # 代码块语言 → 落盘扩展名(把成员产出里的 ```lang 抽成可直接打开/运行的文件)
@@ -121,9 +122,10 @@ def parse_plan(text: str, valid_agents: list[str]) -> list[dict]:
 def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
                 fallback_agent: str = "researcher", task_id: str = "",
                 temperature: float = 0.3, root: str = ".",
-                step_max_tokens: int = 16000) -> dict:
+                step_max_tokens: int = 16000, settings: dict | None = None) -> dict:
     """跑一次 Web 端 CEO 编排。返回 {task_id, plan, summary, degraded, deliverables}。
-    step_max_tokens 给得足够大,避免推理模型把额度烧在思维链上、正文被截空(马里奥游戏类大产出尤甚)。"""
+    step_max_tokens 给得足够大,避免推理模型把额度烧在思维链上、正文被截空(马里奥游戏类大产出尤甚)。
+    settings:用于连接 U 第二大脑 —— 派单前从 U 召回相关记忆注入,结案把经历蒸馏回 U。"""
     led = router.ledger
     task_id = task_id or led.new_task(goal[:80], created_by="user")
     led.log(task_id, "task_assign", "user", "ceo", payload={"summary": goal})
@@ -132,12 +134,21 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
     roster = router.list_agents()
     fallback_agent = fallback_agent if fallback_agent in roster else (roster[0] if roster else "")
 
+    # 0) 从 U(主人第二大脑)按需召回与目标相关的记忆 —— 规划与派单都带上,让团队"知道"主人沉淀的一切
+    u_ctx = umemory.recall(goal, settings)
+    if u_ctx:
+        led.log(task_id, "status_update", "ceo", payload={
+            "summary": "已从 U 第二大脑召回相关记忆,注入本次规划与派单"})
+
     # 1) 规划
     try:
+        plan_user = f"目标:{goal}\n\n团队名册:\n{_roster_desc(router)}"
+        if u_ctx:
+            plan_user += "\n\n" + u_ctx
         plan_resp = _call_openai_compatible(
             ch, ceo_model,
             [{"role": "system", "content": PLAN_SYSTEM},
-             {"role": "user", "content": f"目标:{goal}\n\n团队名册:\n{_roster_desc(router)}"}],
+             {"role": "user", "content": plan_user}],
             temperature, 1500)
         # 简单任务:CEO 直接答,不动用任何 agent
         direct = parse_direct(plan_resp["content"])
@@ -167,7 +178,7 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
     deliverables = []          # [(agent, [相对路径...])]
     for step in plan:
         try:
-            r = router.dispatch(step["agent"], step["instruction"],
+            r = router.dispatch(step["agent"], step["instruction"], context=u_ctx,
                                 task_id=task_id, max_tokens=step_max_tokens)
             content = r.get("content", "") or ""
             if r.get("empty") or not content.strip():     # 空产出:把原因如实带给汇总,别假装成功
@@ -203,7 +214,17 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
             lines.append(f"{ag}: " + " ".join("/" + p for p in runnable))
         summary = (summary + "\n\n📦 交付文件(点开即用):\n" + "\n".join(lines)).strip()
 
+    # 写回 U:把这次编码经历蒸馏成一行追加到 HOT 层当天 daily(升华单向 库→wiki 的入口)
+    u_path = umemory.remember(
+        goal[:60],
+        f"目标:{goal}\n派单:{'、'.join(p['agent'] for p in plan)}\n结论:{summary[:400]}"
+        + (f"\n交付:{', '.join(flat)}" if flat else ""),
+        settings)
+    if u_path:
+        led.log(task_id, "status_update", "ceo", payload={
+            "summary": "本次编码经历已蒸馏写回 U 第二大脑(待每晚 distill 升华进知识图)"})
+
     led.log(task_id, "task_done", "ceo", "user",
             payload={"summary": summary, "deliverables": flat})
     return {"task_id": task_id, "plan": plan, "summary": summary,
-            "degraded": degraded, "deliverables": flat}
+            "degraded": degraded, "deliverables": flat, "u_written": bool(u_path)}

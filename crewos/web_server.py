@@ -382,7 +382,7 @@ async def api_ceo(req: CeoReq):
 
     def run():
         orchestrate(_router(), model, prov["endpoint"], prov["key_env"],
-                    req.goal, task_id=tid, root=str(ROOT))
+                    req.goal, task_id=tid, root=str(ROOT), settings=s)
     asyncio.get_running_loop().run_in_executor(None, run)
     return {"ok": True, "task_id": tid, "mode": "ceo_orchestrate"}
 
@@ -603,9 +603,18 @@ def api_put_settings(body: dict):
                 if k in ("default_task_budget_usd", "monthly_warn_usd",
                          "feishu_webhook", "webhook_url", "dashboard_token",
                          "monthly_hard_usd", "watchdog_suspicious_minutes",
-                         "watchdog_critical_minutes", "ceo_model", "ceo_provider")})
+                         "watchdog_critical_minutes", "ceo_model", "ceo_provider",
+                         "u_memory_enabled", "u_hot_dir", "u_wiki_dir",
+                         "u_gbrain_bin", "u_gbrain_path")})
     f.write_text(yaml.safe_dump(cur, allow_unicode=True), encoding="utf-8")
     return cur
+
+
+@app.get("/api/u-memory")
+def api_u_memory():
+    """U 第二大脑连接状态(看板用):HOT 库 / WARM wiki / gbrain 是否就绪。不回传任何记忆内容。"""
+    from . import umemory
+    return umemory.status(_settings())
 
 
 @app.get("/api/file")

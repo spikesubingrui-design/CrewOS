@@ -465,6 +465,21 @@ input[type=password]:focus{border-color:var(--blue)}
     <div class="cfg-body" id="crew-setup"></div>
   </div>
 
+  <!-- U · 主人第二大脑(永久记忆系统)连接 -->
+  <div class="panel" id="u-panel">
+    <div class="panel-h"><span class="micro">🧠 U · 主人第二大脑(永久记忆)</span>
+      <span class="micro" id="u-state" style="margin-left:auto">检测中…</span></div>
+    <div class="cfg-body" id="u-body">
+      <label class="micro" style="display:flex;gap:8px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="u-enabled" onchange="saveUMemory()">
+        连接 U:派单前从知识图召回相关记忆注入 · 结案把编码经历蒸馏回写</label>
+      <div id="u-status-grid" class="micro" style="margin-top:8px;line-height:2"></div>
+      <div class="micro" style="color:var(--dim);margin-top:6px">
+        U 的真实记忆在仓库之外(<code>~/.openclaw</code> · <code>~/wiki</code>),CrewOS 只内嵌「记忆系统」本身,
+        你的记忆永不进 git。读=按需 <code>gbrain</code> 召回不常驻;写=只追加到当天 daily,绝不直写 wiki。</div>
+    </div>
+  </div>
+
   <div id="config-grid">
     <div>
       <div class="panel collapsible">
@@ -776,7 +791,7 @@ async function init(){
   providers=await (await fetch("/api/providers")).json();
   recs=await (await fetch("/api/recommendations")).json();
   layoutOrbit();orbitTick();loadProviders();renderCrewSetup();llmInit();loadCost();loadSettings();loadFile();connectWS();
-  loadApprovals();loadEvals();renderNoKeyBar();applyI18n();loadCrewUsage();await backfill();
+  loadApprovals();loadEvals();renderNoKeyBar();applyI18n();loadCrewUsage();loadUMemory();await backfill();
   setInterval(loadCost,15000);setInterval(loadApprovals,20000);setInterval(loadEvals,60000);
   setInterval(loadCrewUsage,30000);
   tele({ts:Date.now()/1000,from_agent:"sys",to_agent:"",type:"status_update",payload:"{}",cost_usd:0},
@@ -1192,6 +1207,28 @@ async function loadCost(){
   totalCost=c.total_usd;$("#fuel").textContent="$"+totalCost.toFixed(4);
   agentCost=c.by_agent||{};
   for(const[k,v]of Object.entries(agentCost)){const el=$("#mcost-"+k);if(el)el.textContent="$"+v.toFixed(4)}
+}
+// U 第二大脑连接状态(只读状态,不回传任何记忆内容)
+async function loadUMemory(){
+  try{
+    const s=await (await fetch("/api/u-memory")).json();
+    const cb=$("#u-enabled");if(cb)cb.checked=!!s.enabled;
+    const dot=ok=>ok?'<span style="color:var(--green)">●</span>':'<span style="color:var(--red)">●</span>';
+    $("#u-state").innerHTML=s.connected
+      ?'<span style="color:var(--green)">● 已连接 U</span>'
+      :'<span style="color:var(--amber)">● 未连接</span>';
+    $("#u-status-grid").innerHTML=
+      `${dot(s.hot_ok)} HOT 工作记忆库 &nbsp;<code>${esc(s.hot_dir)}</code><br>`+
+      `${dot(s.wiki_ok)} WARM 永久知识图(wiki) &nbsp;<code>${esc(s.wiki_dir)}</code><br>`+
+      `${dot(s.gbrain_ok)} gbrain 召回引擎 &nbsp;<code>${esc(s.gbrain)}</code>`;
+  }catch(e){const st=$("#u-state");if(st)st.textContent="检测失败";}
+}
+async function saveUMemory(){
+  const on=$("#u-enabled").checked;
+  await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({u_memory_enabled:on})});
+  alert_("info","U",on?"已连接 U —— 派单会召回、结案会蒸馏回写":"已断开 U 连接");
+  loadUMemory();
 }
 async function loadSettings(){
   const s=await (await fetch("/api/settings")).json();

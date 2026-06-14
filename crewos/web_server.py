@@ -49,7 +49,8 @@ def _settings() -> dict:
     base = {"default_task_budget_usd": 2.0, "monthly_warn_usd": 120.0,
             "feishu_webhook": "", "webhook_url": "", "dashboard_token": "",
             "watchdog_suspicious_minutes": 5.0, "watchdog_critical_minutes": 15.0,
-            "monthly_hard_usd": 0.0, "ceo_model": "", "ceo_provider": ""}
+            "monthly_hard_usd": 0.0, "ceo_model": "", "ceo_provider": "",
+            "cny_rate": 7.2}
     if f.exists():
         base.update(yaml.safe_load(f.read_text(encoding="utf-8")) or {})
     return base
@@ -604,6 +605,7 @@ def api_put_settings(body: dict):
                          "feishu_webhook", "webhook_url", "dashboard_token",
                          "monthly_hard_usd", "watchdog_suspicious_minutes",
                          "watchdog_critical_minutes", "ceo_model", "ceo_provider",
+                         "cny_rate",
                          "u_memory_enabled", "u_hot_dir", "u_wiki_dir",
                          "u_gbrain_bin", "u_gbrain_path")})
     f.write_text(yaml.safe_dump(cur, allow_unicode=True), encoding="utf-8")

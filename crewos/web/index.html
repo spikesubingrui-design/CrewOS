@@ -363,17 +363,17 @@ input[type=password]:focus{border-color:var(--blue)}
 <canvas id="stars"></canvas>
 
 <div id="topbar">
-  <div id="wordmark">CREWOS<em>MISSION CONTROL</em></div>
+  <div id="wordmark">CREWOS<em data-i18n="brand_sub">MISSION CONTROL</em></div>
   <nav>
-    <div class="tab active" data-v="orbit">ORBIT</div>
-    <div class="tab" data-v="board">MISSIONS</div>
-    <div class="tab" data-v="cost">COST</div>
-    <div class="tab" data-v="config">CONFIG</div>
+    <div class="tab active" data-v="orbit" data-i18n="nav_orbit">ORBIT</div>
+    <div class="tab" data-v="board" data-i18n="nav_board">MISSIONS</div>
+    <div class="tab" data-v="cost" data-i18n="nav_cost">COST</div>
+    <div class="tab" data-v="config" data-i18n="nav_config">CONFIG</div>
   </nav>
   <div class="grow"></div>
-  <div class="clockbox"><span class="micro">UTC</span><b id="utc">--:--:--</b></div>
+  <div class="clockbox"><span class="micro" data-i18n="tz_label">北京</span><b id="utc">--:--:--</b></div>
   <div class="clockbox"><span class="micro">MET</span><b id="met">T+00:00:00</b></div>
-  <div class="clockbox" id="fuelbox"><span class="micro">FUEL USED</span><b id="fuel">$0.0000</b></div>
+  <div class="clockbox" id="fuelbox"><span class="micro">FUEL USED</span><b id="fuel">¥0.00</b></div>
   <button id="lang-btn" onclick="toggleLang()" title="语言 / Language">中 / EN</button>
   <button id="guide-btn" onclick="openWelcome()" title="新手引导 / Guide" data-i18n="guide">? GUIDE</button>
 </div>
@@ -438,9 +438,9 @@ input[type=password]:focus{border-color:var(--blue)}
 <!-- COST -->
 <div class="view" id="view-cost">
   <div id="cost-kpis">
-    <div class="kpi"><span class="micro" data-i18n="cost_today">今日 TODAY</span><b id="k-today">$0.0000</b></div>
-    <div class="kpi"><span class="micro" data-i18n="cost_month">本月 THIS MONTH</span><b id="k-month">$0.0000</b><span class="kpi-sub" id="k-month-bar"></span></div>
-    <div class="kpi"><span class="micro" data-i18n="cost_total">总计 ALL TIME</span><b id="k-total">$0.0000</b></div>
+    <div class="kpi"><span class="micro" data-i18n="cost_today">今日 TODAY</span><b id="k-today">¥0.00</b></div>
+    <div class="kpi"><span class="micro" data-i18n="cost_month">本月 THIS MONTH</span><b id="k-month">¥0.00</b><span class="kpi-sub" id="k-month-bar"></span></div>
+    <div class="kpi"><span class="micro" data-i18n="cost_total">总计 ALL TIME</span><b id="k-total">¥0.00</b></div>
     <div class="kpi"><span class="micro" data-i18n="cost_saved">对比纯 Opus 估算节省</span><b id="k-saved" style="color:var(--green)">—</b></div>
   </div>
   <div id="cost-grid">
@@ -511,10 +511,12 @@ input[type=password]:focus{border-color:var(--blue)}
           <span class="ctoggle">＋</span></div>
         <div class="cbody" style="display:none">
         <div class="cfg-body">
-          <div class="frow"><label class="micro">单任务燃料上限 USD — 超限自动熔断</label>
-            <input type="number" id="s-budget" step="0.5" min="0.1"></div>
-          <div class="frow"><label class="micro">月度警戒线 USD</label>
-            <input type="number" id="s-warn" step="10" min="10"></div>
+          <div class="frow"><label class="micro">单任务燃料上限 ¥(人民币)— 超限自动熔断</label>
+            <input type="number" id="s-budget" step="1" min="0.5"></div>
+          <div class="frow"><label class="micro">月度警戒线 ¥(人民币)</label>
+            <input type="number" id="s-warn" step="50" min="10"></div>
+          <div class="frow"><label class="micro">美元→人民币汇率(成本一律按此折算展示)</label>
+            <input type="number" id="s-cny" step="0.1" min="1" placeholder="7.2"></div>
           <div class="frow"><label class="micro">DLP 黑名单(每行一条,绝不外泄)</label>
             <textarea id="s-blocklist"></textarea></div>
           <div class="frow"><label class="micro">飞书机器人 webhook(交付/上报/审批推送)</label>
@@ -642,11 +644,17 @@ function starTick(){ctx.clearRect(0,0,cvs.width,cvs.height);
   ctx.globalAlpha=1;requestAnimationFrame(starTick);}
 starInit();starTick();addEventListener("resize",()=>{starInit();layoutOrbit()});
 
-/* ════════ 时钟 ════════ */
+/* ════════ 时钟(统一用中国时区 北京时间 Asia/Shanghai)════════ */
 const t0=Date.now(),pad=n=>String(n).padStart(2,"0");
+// 任意时间戳(ms 或 Date)→ 北京时间 HH:MM:SS,不受运行机器本地时区影响
+function bjClock(ms){
+  return new Date(ms).toLocaleTimeString("zh-CN",{hour12:false,timeZone:"Asia/Shanghai"});
+}
+// 货币:引擎内部一律美元(模型定价 USD/百万 token);展示统一折算人民币 ¥(汇率可在 CONFIG 改)
+let CNY=7.2;
+function money(usd){return "¥"+((usd||0)*CNY).toFixed(2);}
 setInterval(()=>{
-  const d=new Date();
-  document.getElementById("utc").textContent=`${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  document.getElementById("utc").textContent=bjClock(Date.now());
   const s=Math.floor((Date.now()-t0)/1000);
   document.getElementById("met").textContent=`T+${pad(s/3600|0)}:${pad(s/60%60|0)}:${pad(s%60)}`;
 },500);
@@ -718,6 +726,10 @@ const I18N={
   fb_model:{zh:"备用模型(交接,需授权才启用)",en:"Fallback model (handoff, needs approval)"},
   add_agent:{zh:"+ 新增成员",en:"+ Add member"},
   saved:{zh:"已保存",en:"Saved"},
+  brand_sub:{zh:"指挥中心",en:"MISSION CONTROL"},
+  nav_orbit:{zh:"轨道",en:"ORBIT"},nav_board:{zh:"任务",en:"MISSIONS"},
+  nav_cost:{zh:"成本",en:"COST"},nav_config:{zh:"配置",en:"CONFIG"},
+  tz_label:{zh:"北京",en:"CST"},
 };
 function t(k){return (I18N[k]||{})[LANG]||(I18N[k]||{}).en||k}
 function applyI18n(){
@@ -773,7 +785,7 @@ async function init(){
       <div class="crew-row" id="crew-${a.name}" style="cursor:pointer" onclick="focusCrew('${a.name}')">
         <div class="lamp"></div>
         <div><div class="cs">${cs}</div><div class="md">${a.model}</div></div>
-        <div><div class="$$" id="mcost-${a.name}">$0.0000</div><div class="st" id="mst-${a.name}">STANDBY</div></div>
+        <div><div class="$$" id="mcost-${a.name}">¥0.00</div><div class="st" id="mst-${a.name}">STANDBY</div></div>
       </div>`);
     field.insertAdjacentHTML("beforeend",`
       <div class="node" id="node-${a.name}" title="${a.model} · fallback ${a.fallback_model||'—'}"
@@ -1006,8 +1018,8 @@ function handleEvent(ev){
   tele(ev,brief);
   if(ev.cost_usd>0&&!replayMode){totalCost+=ev.cost_usd;
     agentCost[ev.from_agent]=(agentCost[ev.from_agent]||0)+ev.cost_usd;
-    $("#fuel").textContent="$"+totalCost.toFixed(4);
-    const c=$("#mcost-"+ev.from_agent);if(c)c.textContent="$"+agentCost[ev.from_agent].toFixed(4);}
+    $("#fuel").textContent=money(totalCost);
+    const c=$("#mcost-"+ev.from_agent);if(c)c.textContent=money(agentCost[ev.from_agent]);}
   switch(ev.type){
     case "task_assign":
       pulse("ceo",ev.to_agent);setCrew(ev.to_agent,"engaged",brief);
@@ -1094,10 +1106,10 @@ function tele(ev,brief){
     retrospect:"retro",escalation:"alert",dlp_block:"alert",budget_block:"alert",failover:"review",
     risk_action:"assign",approval_request:"review",approval_decision:"done",lesson_saved:"retro",
     watchdog:"alert",budget_warn:"review",agent_paused:"alert"}[ev.type]||"";
-  const d=new Date(ev.ts*1000),ts=`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const ts=bjClock(ev.ts*1000);   // 北京时间
   const route=ev.to_agent?`${(CALLSIGN[ev.from_agent]||ev.from_agent.toUpperCase())} → ${(CALLSIGN[ev.to_agent]||ev.to_agent.toUpperCase())}`
                          :(CALLSIGN[ev.from_agent]||ev.from_agent.toUpperCase());
-  const cost=ev.cost_usd>0?` <span class="cost">$${ev.cost_usd.toFixed(4)}</span>`:"";
+  const cost=ev.cost_usd>0?` <span class="cost">${money(ev.cost_usd)}</span>`:"";
   const box=$("#tele-lines");
   box.insertAdjacentHTML("beforeend",
     `<div class="tl"><span class="ts">${ts}</span> ▸ <span class="${cls}">${route} · ${ev.type.toUpperCase()}</span>${cost}
@@ -1141,7 +1153,7 @@ async function loadMissions(){
     col.insertAdjacentHTML("beforeend",`
       <div class="mission" onclick="recorder('${t.task_id}')">
         <div class="mt">${esc(t.title||"(untitled)")}</div>
-        <div class="mm"><span>${t.task_id} · R${t.rounds||0}</span><span>${ops}<b>$${(t.cost||0).toFixed(4)}</b></span></div>
+        <div class="mm"><span>${t.task_id} · R${t.rounds||0}</span><span>${ops}<b>${money(t.cost||0)}</b></span></div>
       </div>`);
   }
 }
@@ -1150,11 +1162,12 @@ async function taskCancel(tid){
   alert_("warn","CANCELLED",tid+" 已取消");loadMissions();
 }
 async function taskBudget(tid){
-  const v=prompt("新的任务预算上限(USD):","5");
+  const v=prompt("新的任务预算上限(¥ 人民币):","36");   // 输入人民币,内部折回美元给引擎
   if(!v||!(+v>0))return;
+  const usd=(+v)/CNY;
   await fetch("/api/task/"+tid+"/budget",{method:"POST",
-    headers:{"Content-Type":"application/json"},body:JSON.stringify({budget_usd:+v})});
-  alert_("info","BUDGET RAISED",`${tid} 提额至 $${+v} — 重派即续跑`);loadMissions();
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({budget_usd:usd})});
+  alert_("info","BUDGET RAISED",`${tid} 提额至 ${money(usd)} — 重派即续跑`);loadMissions();
 }
 /* 历史回放:把任务事件按时间轴在轨道上重演,不计入燃料 */
 let replayTimers=[];
@@ -1191,10 +1204,9 @@ async function recorder(tid){
     const p=JSON.parse(ev.payload||"{}");
     const cls=["escalation","dlp_block","budget_block"].includes(ev.type)?"alert":
               ev.type==="review_feedback"?"review":"";
-    const d=new Date(ev.ts*1000);
-    const cost=ev.cost_usd>0?` · <span class="cost">$${ev.cost_usd.toFixed(4)} (${ev.tokens_in}/${ev.tokens_out} tok)</span>`:"";
+    const cost=ev.cost_usd>0?` · <span class="cost">${money(ev.cost_usd)} (${ev.tokens_in}/${ev.tokens_out} tok)</span>`:"";
     return `<div class="rec ${cls}">
-      <span class="rm">${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}<br>
+      <span class="rm">${bjClock(ev.ts*1000)}<br>
         ${ev.from_agent.toUpperCase()}${ev.to_agent?" → "+ev.to_agent.toUpperCase():""}</span>
       <span><b>${ev.type.toUpperCase()}</b> · R${ev.round}${cost}<br>${esc(p.summary||p.title||p.reason||"")}</span></div>`;
   }).join("");
@@ -1204,9 +1216,9 @@ async function recorder(tid){
 /* ════════ 成本/设置/档案 ════════ */
 async function loadCost(){
   const c=await (await fetch("/api/cost")).json();
-  totalCost=c.total_usd;$("#fuel").textContent="$"+totalCost.toFixed(4);
+  totalCost=c.total_usd;$("#fuel").textContent=money(totalCost);
   agentCost=c.by_agent||{};
-  for(const[k,v]of Object.entries(agentCost)){const el=$("#mcost-"+k);if(el)el.textContent="$"+v.toFixed(4)}
+  for(const[k,v]of Object.entries(agentCost)){const el=$("#mcost-"+k);if(el)el.textContent=money(v)}
 }
 // U 第二大脑连接状态(只读状态,不回传任何记忆内容)
 async function loadUMemory(){
@@ -1232,7 +1244,10 @@ async function saveUMemory(){
 }
 async function loadSettings(){
   const s=await (await fetch("/api/settings")).json();
-  $("#s-budget").value=s.default_task_budget_usd;$("#s-warn").value=s.monthly_warn_usd;
+  CNY=+s.cny_rate||7.2;                          // 全局汇率(成本展示用)
+  const r2=v=>Math.round((v||0)*CNY*100)/100;    // 美元存储 → 人民币展示
+  $("#s-cny").value=CNY;
+  $("#s-budget").value=r2(s.default_task_budget_usd);$("#s-warn").value=r2(s.monthly_warn_usd);
   $("#s-feishu").value=s.feishu_webhook||"";$("#s-webhook").value=s.webhook_url||"";
   $("#s-token").value=s.dashboard_token||"";
   // CEO 供应商下拉(分组)+ 当前值
@@ -1255,8 +1270,11 @@ async function saveCeo(){
 }
 async function saveSettings(btn){
   const token=$("#s-token").value.trim();
+  const rate=+$("#s-cny").value||CNY;CNY=rate;             // 先更新汇率
+  const toUsd=v=>Math.round(((+v||0)/rate)*1e6)/1e6;       // 人民币输入 → 美元存储(引擎用美元)
   await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({default_task_budget_usd:+$("#s-budget").value,monthly_warn_usd:+$("#s-warn").value,
+    body:JSON.stringify({default_task_budget_usd:toUsd($("#s-budget").value),
+      monthly_warn_usd:toUsd($("#s-warn").value),cny_rate:rate,
       feishu_webhook:$("#s-feishu").value.trim(),webhook_url:$("#s-webhook").value.trim(),
       dashboard_token:token})});
   if(token)document.cookie="crewos_token="+encodeURIComponent(token)+"; SameSite=Strict";
@@ -1275,7 +1293,7 @@ async function loadEvals(){
       <td>${CALLSIGN[e.agent]||e.agent}</td><td style="color:var(--dim)">${e.model}</td>
       <td>${e.tasks}</td><td style="color:${e.first_pass_rate>=.7?"var(--green)":"var(--amber)"}">${Math.round(e.first_pass_rate*100)}%</td>
       <td>${e.avg_rounds}</td><td style="color:${e.escalations?"var(--red)":"var(--dim)"}">${e.escalations}</td>
-      <td style="color:var(--amber)">${e.cost_usd.toFixed(4)}</td></tr>`).join("")}
+      <td style="color:var(--amber)">${money(e.cost_usd)}</td></tr>`).join("")}
   </table>`;
 }
 async function loadFile(){
@@ -1669,7 +1687,7 @@ function renderNoKeyBar(){
 /* ════════ 成本仪表盘 ════════ */
 async function loadCostDashboard(){
   const c=await (await fetch("/api/cost/dashboard?days=14")).json();
-  const f=v=>"$"+(v||0).toFixed(4);
+  const f=v=>money(v);
   $("#k-today").textContent=f(c.today_usd);
   $("#k-month").textContent=f(c.month_usd);
   $("#k-total").textContent=f(c.total_usd);
@@ -1677,14 +1695,14 @@ async function loadCostDashboard(){
   const warn=c.monthly_warn_usd||0,bar=$("#k-month-bar");
   if(warn>0){const pct=Math.min(100,c.month_usd/warn*100);
     bar.innerHTML=`<i style="width:${pct}%;background:${pct>=100?'var(--red)':pct>=80?'var(--amber)':'var(--green)'}"></i>`;
-    bar.title=`本月警戒线 $${warn}`;}else bar.innerHTML="";
+    bar.title=`本月警戒线 ${money(warn)}`;}else bar.innerHTML="";
   // 节省估算:CrewOS 实花 vs 全用 Opus(粗估 in$15/out$75,按 ~12x 便宜均值反推)
   const saved=c.total_usd>0?Math.round((1-1/12)*100):0;
   $("#k-saved").textContent=c.total_usd>0?`~${saved}%`:"—";
   // 逐日柱
   const days=c.by_day||[],max=Math.max(...days.map(d=>d.cost),1e-9);
   $("#cost-spark").innerHTML=days.map(d=>
-    `<div class="bar" title="${d.day}: $${d.cost.toFixed(4)}">
+    `<div class="bar" title="${d.day}: ${money(d.cost)}">
        <i style="height:${Math.max(2,d.cost/max*150)}px"></i><span>${d.day.slice(3)}</span></div>`).join("");
   // 按模型 / 按 agent
   const rows=(obj,nameFn)=>{
@@ -1693,7 +1711,7 @@ async function loadCostDashboard(){
     const mx=Math.max(...ents.map(e=>e[1]));
     return ents.map(([k,v])=>`<div class="costrow"><span class="cn">${esc(nameFn(k))}</span>
       <span class="cbar" style="width:${Math.max(8,v/mx*70)}px"></span>
-      <span class="cv">$${v.toFixed(4)}</span></div>`).join("");
+      <span class="cv">${money(v)}</span></div>`).join("");
   };
   $("#cost-by-model").innerHTML=rows(c.by_model,k=>k||"(未知)");
   $("#cost-by-agent").innerHTML=rows(c.by_agent,k=>CALLSIGN[k]||k);

@@ -216,6 +216,16 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
 .rc-more.show{display:grid}
 .rc-del{color:var(--dim);cursor:pointer;font-size:12px;padding:0 4px}
 .rc-del:hover{color:var(--red)}
+/* 保存成功的就地确认 */
+.btn.btn-ok{background:var(--green)!important;border-color:var(--green)!important;color:#04060c!important;
+  box-shadow:0 0 16px rgba(46,229,157,.5)!important}
+.role-card.flash,.provcard.flash{animation:cardflash 1.3s ease-out}
+@keyframes cardflash{0%{box-shadow:inset 0 0 0 2px var(--green),0 0 24px rgba(46,229,157,.25)}
+  100%{box-shadow:inset 0 0 0 0 transparent,0 0 0 transparent}}
+/* 自动改写模型输入时的就地提示 */
+input.justset{animation:inset 0.9s ease-out}
+@keyframes inset{0%{border-color:var(--green);box-shadow:0 0 0 2px rgba(46,229,157,.35)}
+  100%{border-color:var(--line);box-shadow:none}}
 @media(max-width:680px){.rc-grid{grid-template-columns:1fr 1fr}}
 
 /* 供应商面板 */
@@ -496,7 +506,7 @@ input[type=password]:focus{border-color:var(--blue)}
             <input type="text" id="s-webhook" placeholder="https://…" style="width:100%"></div>
           <div class="frow"><label class="micro">Access Token(局域网/隧道访问必配,留空关闭)</label>
             <input type="text" id="s-token" placeholder="设置后访问需带 ?token=…" style="width:100%"></div>
-          <button class="btn" onclick="saveSettings()">COMMIT</button>
+          <button class="btn" onclick="saveSettings(this)">COMMIT</button>
         </div>
         </div>
       </div>
@@ -690,6 +700,7 @@ const I18N={
   more_opts:{zh:"⋯ 更多(备用模型 / 温度)",en:"⋯ More (fallback / temperature)"},
   fb_model:{zh:"备用模型(交接,需授权才启用)",en:"Fallback model (handoff, needs approval)"},
   add_agent:{zh:"+ 新增成员",en:"+ Add member"},
+  saved:{zh:"已保存",en:"Saved"},
 };
 function t(k){return (I18N[k]||{})[LANG]||(I18N[k]||{}).en||k}
 function applyI18n(){
@@ -1197,7 +1208,7 @@ async function saveCeo(){
   $("#s-ceo-status").textContent=r.ok?"已保存":"失败";
   if(r.ok)alert_("info","CEO","总指挥模型已设置 — TRANSMIT 选 CDR·CEO 即可自动编排");
 }
-async function saveSettings(){
+async function saveSettings(btn){
   const token=$("#s-token").value.trim();
   await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({default_task_budget_usd:+$("#s-budget").value,monthly_warn_usd:+$("#s-warn").value,
@@ -1207,6 +1218,7 @@ async function saveSettings(){
   await fetch("/api/file",{method:"PUT",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({path:"config/dlp_blocklist.txt",content:$("#s-blocklist").value})});
   alert_("info","CONFIG","fuel limits / security / comms relay committed");
+  flashSaved(btn);
 }
 async function loadEvals(){
   const r=await (await fetch("/api/evals")).json();
@@ -1337,7 +1349,7 @@ function loadProviders(){
 function provSelect(){
   const p=providers.find(x=>x.id===$("#prov-select").value);if(!p)return;
   $("#prov-config").innerHTML=`
-    <div class="provcard">
+    <div class="provcard" id="pc-${p.id}">
       <div class="provhd">
         <span class="chip ${p.key_set?'ok':'no'}">${p.key_set?'✓ 已配置':'未配置'}</span>
         <b>${esc(p.name)}</b>
@@ -1363,6 +1375,7 @@ async function saveProviderKey(pid,keyEnv){
   alert_("info","PROVIDER",provName(pid)+" key 已保存,即时生效");
   providers=await (await fetch("/api/providers")).json();
   loadProviders();llmLoad();renderNoKeyBar();
+  const c=$("#pc-"+pid);if(c){void c.offsetWidth;c.classList.add("flash");setTimeout(()=>c.classList.remove("flash"),1400);}
 }
 async function addCustomProvider(){
   const name=$("#cp-name").value.trim(),endpoint=$("#cp-endpoint").value.trim(),api_key=$("#cp-key").value.trim();
@@ -1417,13 +1430,13 @@ function roleCard(key,name,role,model,provId,withRec,fb,temp){
     <div class="rc-grid">
       <span><input type="text" id="rcm-${key}" value="${esc(model||"")}" list="rcdl-${key}"
         placeholder="模型(配好 key 后可下拉选)" style="width:100%"><datalist id="rcdl-${key}"></datalist></span>
-      <select id="rcp-${key}" onchange="roleKeyRow('${key}')">${provOptions(provId)}</select>
+      <select id="rcp-${key}" onchange="roleProvChange('${key}')">${provOptions(provId)}</select>
       ${withRec?`<button class="btn" onclick="roleUseRec('${key}')">用推荐</button>`:`<span></span>`}
-      <button class="btn solid" onclick="roleSave('${key}')">保存</button>
+      <button class="btn solid" onclick="roleSave('${key}',this)">保存</button>
     </div>
     <div class="rc-key" id="rck-${key}">
       <input type="password" id="rckin-${key}" placeholder="">
-      <button class="btn" onclick="roleSaveKey('${key}')">保存 key</button>
+      <button class="btn" onclick="roleSaveKey('${key}',this)">保存 key</button>
     </div>
     <div class="rc-keynote" id="rckn-${key}"></div>
     ${more}
@@ -1474,16 +1487,42 @@ function roleKeyRow(key){   // 根据当前选中的供应商,刷新该卡的 ke
   $("#rckn-"+key).textContent=p.key_set?"":`这个 key 写入 ${p.key_env},所有用 ${p.name} 的成员共享`;
   fillModels(pid,"rcdl-"+key);   // 拉该供应商模型填进 datalist,少手输
 }
+// 用户切换供应商:刷新状态行 + 自动把模型切到该厂商(推荐模型 > 首个可拉到的模型),不再留着上家的型号
+async function roleProvChange(key){
+  roleKeyRow(key);
+  const pid=$("#rcp-"+key).value,inp=$("#rcm-"+key);if(!inp)return;
+  const rec=recs[key];
+  // 1) 选中的正是该角色推荐渠道 → 直接用推荐型号(必属该厂商)
+  if(rec&&(rec.providers||[]).includes(pid)){inp.value=rec.model;flashInput(inp);return;}
+  // 2) 否则尝试拉该厂商真实模型列表(需已配 key)→ 用首个
+  const models=await fillModels(pid,"rcdl-"+key);
+  // 3) 拉不到(没配 key)就清空,绝不残留上家厂商的型号(如把 glm-5.1 留在 deepseek 上);占位符提示去配 key 再下拉
+  inp.value=(models&&models.length)?models[0]:"";
+  flashInput(inp);
+}
+// 就地确认:输入框被自动改写时闪一下,让人看见“变了”
+function flashInput(inp){if(!inp)return;inp.classList.remove("justset");void inp.offsetWidth;inp.classList.add("justset");
+  setTimeout(()=>inp.classList.remove("justset"),900);}
+// 就地确认:保存成功后按钮变绿打勾 + 卡片描边一闪,比纯弹窗更明显
+function flashSaved(btn,label){
+  if(!btn)return;
+  const card=btn.closest(".role-card,.provcard,.collapsible,.panel");
+  if(card){card.classList.remove("flash");void card.offsetWidth;card.classList.add("flash");
+    setTimeout(()=>card.classList.remove("flash"),1400);}
+  const old=btn.dataset.lbl0!==undefined?btn.dataset.lbl0:(btn.dataset.lbl0=btn.textContent);
+  btn.classList.add("btn-ok");btn.textContent=label||("✓ "+t("saved"));btn.disabled=true;
+  setTimeout(()=>{btn.classList.remove("btn-ok");btn.textContent=old;btn.disabled=false;delete btn.dataset.lbl0;},1600);
+}
 const _modelCache={};
 async function fillModels(pid,datalistId){
-  const dl=$("#"+datalistId);if(!dl)return;
   let models=_modelCache[pid];
   if(!models){
     try{const r=await (await fetch("/api/provider-models/"+pid)).json();models=r.models||[];}
     catch(e){models=[];}
     _modelCache[pid]=models;
   }
-  dl.innerHTML=models.map(m=>`<option value="${esc(m)}">`).join("");
+  const dl=$("#"+datalistId);if(dl)dl.innerHTML=models.map(m=>`<option value="${esc(m)}">`).join("");
+  return models;
 }
 function roleUseRec(key){
   const rec=recs[key];if(!rec)return;
@@ -1493,13 +1532,14 @@ function roleUseRec(key){
   roleKeyRow(key);
   alert_("info","推荐",`${CALLSIGN[key]||key} → ${rec.model}(${rec.reason.slice(0,30)}…)`);
 }
-async function roleSave(key){
+async function roleSave(key,btn){
   const model=$("#rcm-"+key).value.trim(),pid=$("#rcp-"+key).value;
   if(!model){alert_("err","CONFIG","请填模型 ID");return}
   if(key==="__ceo__"){
     const r=await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({ceo_model:model,ceo_provider:pid})});
-    if(r.ok)alert_("info","CEO",`总指挥 → ${model} @ ${provById(pid)?.name||pid}`);
+    if(!r.ok){alert_("err","CEO","保存失败");return}
+    alert_("info","CEO",`总指挥 → ${model} @ ${provById(pid)?.name||pid}`);
   }else{
     const body={model,provider_id:pid};
     const fb=$("#rcf-"+key),tp=$("#rct-"+key);   // 折叠的非必需项,有才发
@@ -1513,8 +1553,9 @@ async function roleSave(key){
     const a=agents.find(x=>x.name===key),md=$("#node-"+key+" .md"),row=$("#crew-"+key+" .md");
     if(a&&md)md.textContent=a.model;if(a&&row)row.textContent=a.model;
   }
+  flashSaved(btn);   // 就地确认:绿勾 + 卡片闪一下,不只靠弹窗
 }
-async function roleSaveKey(key){
+async function roleSaveKey(key,btn){
   const pid=$("#rcp-"+key).value,p=provById(pid),v=$("#rckin-"+key).value.trim();
   if(!v){alert_("warn","PROVIDER","请先粘贴 key");return}
   const r=await fetch("/api/provider-key",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -1522,7 +1563,10 @@ async function roleSaveKey(key){
   if(!r.ok){alert_("err","PROVIDER","保存失败");return}
   alert_("info","PROVIDER",`${p.name} key 已保存,即时生效`);
   providers=await (await fetch("/api/providers")).json();
-  renderCrewSetup();loadProviders&&loadProviders();renderNoKeyBar();
+  // 不整块重渲(那会抹掉按钮的就地确认);只就地刷新各卡 key 状态行
+  ["__ceo__",...agents.map(a=>a.name)].forEach(roleKeyRow);
+  flashSaved(btn);
+  loadProviders&&loadProviders();renderNoKeyBar();
 }
 
 /* ════════ 加载时回填历史(修"开页假死") ════════ */

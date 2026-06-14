@@ -53,7 +53,8 @@ def _post_json(url: str, body: dict, timeout: int = 5):
     req = urllib.request.Request(
         url, data=json.dumps(body, ensure_ascii=False).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
-    urllib.request.urlopen(req, timeout=timeout).read()
+    with urllib.request.urlopen(req, timeout=timeout) as resp:   # 用 with 确保连接关闭
+        resp.read()
 
 
 def push(settings: dict, ev: dict):

@@ -50,7 +50,7 @@ class AgentProfile:
     memory_files: list[tuple[str, str]]   # (文件名, 内容)
     fallback_model: str = ""
     temperature: float = 0.7
-    workspace: Path = field(default=Path("."))
+    workspace: Path = field(default_factory=lambda: Path("."))
 
     def memory_digest(self, query: str = "") -> str:
         """角色记忆注入文本。错题本按当前任务相似度选 top-3,其余文件截断拼接。"""
@@ -108,7 +108,7 @@ def _http_error_detail(e: "urllib.error.HTTPError") -> str:
     401/403=key 无效或没配,404/400 常见=模型 ID 不对,429=限流。"""
     body = ""
     try:
-        raw = e.read().decode("utf-8", "ignore")
+        raw = e.read(8192).decode("utf-8", "ignore")   # 只读前 8KB,错误体可能很大
         try:
             j = json.loads(raw)
             body = (j.get("error", {}).get("message") if isinstance(j.get("error"), dict)

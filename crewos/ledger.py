@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -57,6 +58,7 @@ class Ledger:
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
         self._conn.commit()
+        self._wlock = threading.Lock()   # 串行化跨线程写入(共享连接 + check_same_thread=False)
 
     def log(
         self,
@@ -75,15 +77,16 @@ class Ledger:
         if type not in EVENT_TYPES:
             raise ValueError(f"未知事件类型: {type}")
         event_id = uuid.uuid4().hex[:12]
-        self._conn.execute(
-            "INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                event_id, time.time(), task_id, round, from_agent, to_agent,
-                type, json.dumps(payload or {}, ensure_ascii=False),
-                model, channel, tokens_in, tokens_out, cost_usd,
-            ),
-        )
-        self._conn.commit()
+        with self._wlock:
+            self._conn.execute(
+                "INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    event_id, time.time(), task_id, round, from_agent, to_agent,
+                    type, json.dumps(payload or {}, ensure_ascii=False),
+                    model, channel, tokens_in, tokens_out, cost_usd,
+                ),
+            )
+            self._conn.commit()
         return event_id
 
     def new_task(self, title: str, created_by: str = "user") -> str:

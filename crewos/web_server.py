@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -87,11 +88,22 @@ def _blocklist() -> list[str]:
             if l.strip() and not l.startswith("#")]
 
 
+_LEDGER_CACHE: dict = {}
+
+
 def _ledger() -> Ledger:
-    return Ledger(ROOT / "data" / "ledger.db")
+    # 复用单条 SQLite 连接(按 db 路径缓存)——避免每个请求/后台循环新建连接(fd 浪费 + WAL 抖动)。
+    # 按路径缓存而非纯单例:测试切换 ROOT 到临时目录时各得各的 ledger,互不串扰。
+    key = str((ROOT / "data" / "ledger.db").resolve())
+    led = _LEDGER_CACHE.get(key)
+    if led is None:
+        led = Ledger(ROOT / "data" / "ledger.db")
+        _LEDGER_CACHE[key] = led
+    return led
 
 
 def _router() -> Router:
+    # Router 仍每次新建以拿到最新配置(预算/DLP 黑名单可在线编辑),但复用共享 Ledger 连接。
     s = _settings()
     return Router(ROOT / "agents", _ledger(),
                   default_task_budget_usd=float(s["default_task_budget_usd"]),
@@ -121,8 +133,8 @@ def _poll_events():
                     if _loop:
                         asyncio.run_coroutine_threadsafe(_safe_send(ws, msg), _loop)
                 notify_push(settings, dict(r))
-        except Exception:
-            pass
+        except Exception as exc:   # 不要静默吞掉:打到 stderr 便于排查事件投递故障
+            print(f"[poll_events] {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 async def _safe_send(ws: WebSocket, msg: str):

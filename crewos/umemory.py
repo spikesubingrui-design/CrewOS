@@ -118,8 +118,11 @@ def remember(title: str, body: str, settings: dict | None = None, tag: str = "cr
     f = c["hot_dir"] / f"{day}.md"
     entry = f"\n\n## [CrewOS·{tag}] {title.strip()} ({day} {stamp})\n{body.strip()}\n"
     try:
-        existing = f.read_text(encoding="utf-8") if f.exists() else f"# {day}\n"
-        f.write_text(existing.rstrip() + entry, encoding="utf-8")
+        new_file = not f.exists()
+        with open(f, "a", encoding="utf-8") as fh:   # 追加模式:避免读-改-写竞态损坏当天 daily
+            if new_file:
+                fh.write(f"# {day}\n")
+            fh.write(entry)
         return str(f)
     except Exception:
         return ""

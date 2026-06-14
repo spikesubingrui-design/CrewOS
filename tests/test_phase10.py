@@ -109,3 +109,33 @@ def test_agent_role_prompts_are_strong_contracts():
         assert "SUMMARY:" in txt, f"{a} 缺 SUMMARY 行"
         assert "来自 U" in txt, f"{a} 缺 U 召回钩子"
         assert "【验收标准】" in txt, f"{a} 未引用 instruction 的验收标准"
+
+
+# ── v0.14.2:资源/并发健壮性(夜间评审 Batch B) ──
+def test_ledger_concurrent_writes_are_safe():
+    """共享连接 + 写锁:多线程并发 log 不丢事件、不抛错。"""
+    import threading as _t
+    from crewos.ledger import Ledger
+    with tempfile.TemporaryDirectory() as d:
+        led = Ledger(Path(d) / "l.db")
+        tid = led.new_task("并发")
+        errs = []
+        def w(i):
+            try: led.log(tid, "status_update", "sys", payload={"i": i})
+            except Exception as e: errs.append(e)
+        ts = [_t.Thread(target=w, args=(i,)) for i in range(30)]
+        [x.start() for x in ts]; [x.join() for x in ts]
+        assert not errs, errs
+        evs = led.task_events(tid)
+        # 1 task_created + 30 status_update
+        assert len([e for e in evs if e["type"] == "status_update"]) == 30
+
+
+def test_web_ledger_is_singleton_per_path(monkeypatch):
+    """web_server._ledger() 复用同一连接(按路径缓存),不再每请求新建。"""
+    import crewos.web_server as ws
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch.setattr(ws, "ROOT", Path(d))
+        ws._LEDGER_CACHE.clear()
+        a = ws._ledger(); b = ws._ledger()
+        assert a is b

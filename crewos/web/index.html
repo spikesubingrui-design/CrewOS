@@ -179,6 +179,8 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
 .chip.ok{color:var(--green);border-color:rgba(46,229,157,.4)}
 .chip.no{color:var(--amber);border-color:rgba(255,180,84,.4)}
 /* 供应商面板 */
+.provcard{background:rgba(79,124,255,.06);border:1px solid var(--line-strong);border-radius:3px;
+  padding:13px 15px;margin-top:6px}
 .provrow{padding:12px 0;border-bottom:1px solid var(--line)}
 .provrow:last-child{border-bottom:none}
 .provhd{display:flex;align-items:center;gap:8px;font-size:12px}
@@ -409,9 +411,14 @@ input[type=password]:focus{border-color:var(--blue)}
         </div>
       </div>
       <div class="panel" style="margin-top:16px">
-        <div class="panel-h"><span class="micro">Providers / 供应商 · 粘 key 即用</span>
-          <span class="micro" style="color:var(--dim)">key 只存本地 .env</span></div>
-        <div class="cfg-body" id="providers"></div>
+        <div class="panel-h"><span class="micro">Providers / 供应商 · 选择后配 key</span>
+          <span class="micro" style="color:var(--dim)" id="prov-count">—</span></div>
+        <div class="cfg-body">
+          <div id="prov-configured"></div>
+          <div class="frow"><label class="micro">选择供应商(市面常见全集)</label>
+            <select id="prov-select" onchange="provSelect()" style="width:100%"></select></div>
+          <div id="prov-config"></div>
+        </div>
         <div class="cfg-body" style="border-top:1px solid var(--line)">
           <div class="micro" style="margin-bottom:10px;color:var(--ice)">+ CUSTOM PROVIDER(任何 OpenAI 兼容端点)</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -620,8 +627,10 @@ function wSteps(){
     +`<span><b>${(r&&r.model)||a.model}</b> · ${CREW_BLURB[a.name]||""}`
     +`${r?`<br><span style="color:var(--dim);font-size:11px">✦ ${esc(r.reason)}</span>`:''}</span></div>`}).join("");
   const keyed=anyKeySet();
-  const uplink=(providers||[]).map(p=>
-    `<span class="pill ${p.key_set?'ok':'no'}">${p.name.split(' ')[0]} ${p.key_set?'✓':'缺'}</span>`).join(" ");
+  const setp=(providers||[]).filter(p=>p.key_set);
+  const uplink=setp.length
+    ? setp.map(p=>`<span class="pill ok">${esc(p.name.split(' ')[0])} ✓</span>`).join(" ")
+    : `<span class="pill no">尚无供应商配置</span>`;
   return [
     {eyebrow:"MISSION BRIEFING",title:`欢迎登上 <span class="accent">CREWOS</span>`,
      html:`<p>这是你的 <b>一人公司 AI 团队操作系统</b>。理念很简单:</p>
@@ -1044,34 +1053,57 @@ async function llmSave(){
   const row=$("#crew-"+name+" .md");if(row)row.textContent=a.model;
 }
 
-/* ════════ 供应商面板(粘 key 即用) ════════ */
+/* ════════ 供应商面板:选择 → 配 key ════════ */
 function loadProviders(){
-  const box=$("#providers");box.innerHTML="";
-  for(const p of providers){
-    box.insertAdjacentHTML("beforeend",`
-      <div class="provrow">
-        <div class="provhd">
-          <span class="chip ${p.key_set?'ok':'no'}">${p.key_set?'✓ 已配':'缺 key'}</span>
-          <b>${esc(p.name)}</b>${p.custom?' <span class="micro">custom</span>':''}
-          ${p.signup?`<a href="${p.signup}" target="_blank" class="micro" style="margin-left:auto">获取 key ↗</a>`:''}
-        </div>
-        <div class="provnote">${esc(p.note||"")}</div>
-        <div class="provkey">
-          <input type="password" id="pk-${p.id}" placeholder="${p.key_set?'已配置 — 输入可覆盖':'粘贴 '+p.key_env}">
-          <button class="btn" onclick="saveProviderKey('${p.id}','${p.key_env}')">保存</button>
-        </div>
-      </div>`);
-  }
+  const set=providers.filter(p=>p.key_set);
+  $("#prov-count").textContent=`${set.length}/${providers.length} 已配`;
+  // 已配置 chips(点击跳到该供应商配置)
+  $("#prov-configured").innerHTML = set.length
+    ? `<div style="margin-bottom:12px">${set.map(p=>
+        `<span class="chip ok" style="cursor:pointer" onclick="provJump('${p.id}')">✓ ${esc(p.name.split(' ')[0])}</span>`).join("")}</div>`
+    : "";
+  // 分组下拉
+  const groups={};
+  for(const p of providers)(groups[p.group||"其他"]=groups[p.group||"其他"]||[]).push(p);
+  const order=["聚合网关","国际直连","国内直连","本地自托管","自定义","其他"];
+  const sel=$("#prov-select");const keep=sel.value;
+  sel.innerHTML=order.filter(g=>groups[g]).map(g=>
+    `<optgroup label="${g}">`+groups[g].map(p=>
+      `<option value="${p.id}">${p.key_set?'✓ ':''}${esc(p.name)}</option>`).join("")+`</optgroup>`).join("");
+  // 默认选中:保持原选 / 第一个未配置的 / 第一个
+  sel.value=keep&&providers.some(p=>p.id===keep)?keep
+            :(providers.find(p=>!p.key_set)||providers[0]).id;
+  provSelect();
 }
+function provSelect(){
+  const p=providers.find(x=>x.id===$("#prov-select").value);if(!p)return;
+  $("#prov-config").innerHTML=`
+    <div class="provcard">
+      <div class="provhd">
+        <span class="chip ${p.key_set?'ok':'no'}">${p.key_set?'✓ 已配置':'未配置'}</span>
+        <b>${esc(p.name)}</b>
+        ${p.signup?`<a href="${esc(p.signup)}" target="_blank" class="micro" style="margin-left:auto">获取 key ↗</a>`:''}
+      </div>
+      <div class="provnote">${esc(p.note||"")}</div>
+      <div class="provnote" style="color:var(--dim)">端点 ${esc(p.endpoint)} · 写入 ${esc(p.key_env)}</div>
+      <div class="provkey">
+        <input type="password" id="pk-input" placeholder="${p.key_set?'已配置 — 输入可覆盖':'粘贴 API key'}"
+               onkeydown="if(event.key==='Enter')saveProviderKey('${p.id}','${p.key_env}')">
+        <button class="btn solid" onclick="saveProviderKey('${p.id}','${p.key_env}')">保存 key</button>
+      </div>
+    </div>`;
+}
+function provJump(pid){$("#prov-select").value=pid;provSelect();
+  $("#prov-config").scrollIntoView({behavior:"smooth",block:"center"});}
 async function saveProviderKey(pid,keyEnv){
-  const v=$("#pk-"+pid).value.trim();
+  const v=$("#pk-input").value.trim();
   if(!v){alert_("warn","PROVIDER","请先粘贴 key");return}
   const r=await fetch("/api/provider-key",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({key_env:keyEnv,api_key:v})});
   if(!r.ok){alert_("err","PROVIDER","保存失败");return}
   alert_("info","PROVIDER",provName(pid)+" key 已保存,即时生效");
   providers=await (await fetch("/api/providers")).json();
-  loadProviders();llmLoad();renderNoKeyBar();   // 刷新推荐横幅与零key提示条
+  loadProviders();llmLoad();renderNoKeyBar();
 }
 async function addCustomProvider(){
   const name=$("#cp-name").value.trim(),endpoint=$("#cp-endpoint").value.trim(),api_key=$("#cp-key").value.trim();

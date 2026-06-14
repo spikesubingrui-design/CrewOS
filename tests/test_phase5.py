@@ -15,10 +15,19 @@ from crewos import providers as provcat
 
 def test_builtin_catalog_and_recommendations():
     ids = {p["id"] for p in provcat.BUILTIN_PROVIDERS}
-    assert {"openrouter", "openai", "deepseek", "moonshot", "zhipu",
-            "dashscope", "ark"} <= ids
+    # 市面常见全集:聚合/国际/国内/本地各有代表
+    assert {"openrouter", "siliconflow", "openai", "anthropic", "gemini", "xai",
+            "mistral", "groq", "deepseek", "moonshot", "zhipu", "dashscope", "ark",
+            "minimax", "ollama"} <= ids
+    assert len(provcat.BUILTIN_PROVIDERS) >= 25
+    seen = set()
     for p in provcat.BUILTIN_PROVIDERS:
         assert p["endpoint"].startswith("http") and p["key_env"].isupper()
+        assert p.get("group"), f"{p['id']} 缺 group"
+        assert p["id"] not in seen, f"重复 id {p['id']}"
+        seen.add(p["id"])
+        assert p["key_env"] not in [q["key_env"] for q in provcat.BUILTIN_PROVIDERS if q["id"] != p["id"]], \
+            f"{p['id']} key_env 与他人冲突"
     # 7 个执行 agent 都有推荐 + 理由 + 至少一个供应商
     assert set(provcat.RECOMMENDATIONS) == {
         "coder", "writer", "researcher", "analyst", "builder", "runner", "perceiver"}

@@ -451,7 +451,7 @@ def api_providers():
     out = []
     for p in provcat.load_providers(ROOT):
         out.append({**{k: p.get(k) for k in
-                       ("id", "name", "endpoint", "key_env", "signup", "note")},
+                       ("id", "name", "endpoint", "key_env", "signup", "note", "group")},
                     "custom": bool(p.get("custom")),
                     "key_set": _env_has(p.get("key_env", ""))})
     return out

@@ -28,6 +28,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
 #topbar{position:relative;z-index:10;display:flex;align-items:center;gap:26px;
   padding:0 26px;height:58px;border-bottom:1px solid var(--line);
   background:linear-gradient(180deg,rgba(6,9,18,.92),rgba(6,9,18,.78));backdrop-filter:blur(10px)}
+/* 窄屏:允许换行、收紧间距、时钟盒可隐藏,避免顶栏溢出裁切 */
+@media(max-width:760px){
+  #topbar{flex-wrap:wrap;height:auto;min-height:52px;gap:10px 14px;padding:8px 14px}
+  #topbar .clockbox{display:none}
+  nav{order:3;width:100%;overflow-x:auto}
+}
 #wordmark{font-family:var(--disp);font-weight:700;font-size:16px;letter-spacing:.34em;white-space:nowrap}
 #wordmark em{font-style:normal;color:var(--ice);font-weight:400;letter-spacing:.22em;font-size:10px;
   margin-left:12px;vertical-align:1px}
@@ -373,7 +379,7 @@ input[type=password]:focus{border-color:var(--blue)}
   <div class="grow"></div>
   <div class="clockbox"><span class="micro" data-i18n="tz_label">北京</span><b id="utc">--:--:--</b></div>
   <div class="clockbox"><span class="micro">MET</span><b id="met">T+00:00:00</b></div>
-  <div class="clockbox" id="fuelbox"><span class="micro">FUEL USED</span><b id="fuel">¥0.00</b></div>
+  <div class="clockbox" id="fuelbox"><span class="micro" data-i18n="fuel_used">已花费</span><b id="fuel">¥0.00</b></div>
   <button id="lang-btn" onclick="toggleLang()" title="语言 / Language">中 / EN</button>
   <button id="guide-btn" onclick="openWelcome()" title="新手引导 / Guide" data-i18n="guide">? GUIDE</button>
 </div>
@@ -412,7 +418,7 @@ input[type=password]:focus{border-color:var(--blue)}
       </div>
     </div>
     <div class="panel" id="telemetry">
-      <div class="panel-h"><span class="micro">Telemetry / Comms</span><span class="micro">LIVE</span></div>
+      <div class="panel-h"><span class="micro" data-i18n="telemetry">遥测 / 通信</span><span class="micro" id="tele-live" data-i18n="live">实时</span></div>
       <div id="tele-lines"></div>
     </div>
     <div class="panel" id="transmit">
@@ -726,6 +732,9 @@ const I18N={
   fb_model:{zh:"备用模型(交接,需授权才启用)",en:"Fallback model (handoff, needs approval)"},
   add_agent:{zh:"+ 新增成员",en:"+ Add member"},
   saved:{zh:"已保存",en:"Saved"},
+  fuel_used:{zh:"已花费",en:"FUEL USED"},
+  telemetry:{zh:"遥测 / 通信",en:"Telemetry / Comms"},
+  live:{zh:"实时",en:"LIVE"},
   brand_sub:{zh:"指挥中心",en:"MISSION CONTROL"},
   nav_orbit:{zh:"轨道",en:"ORBIT"},nav_board:{zh:"任务",en:"MISSIONS"},
   nav_cost:{zh:"成本",en:"COST"},nav_config:{zh:"配置",en:"CONFIG"},
@@ -768,6 +777,7 @@ function goConfigProviders(){
 
 /* ════════ 初始化 ════════ */
 async function init(){
+ try{
   agents=await (await fetch("/api/agents")).json();
   $("#crew-count").textContent=agents.length+" + CDR";
   const ml=$("#manifest-list"),tx=$("#tx-agent"),fs=$("#f-select");
@@ -809,6 +819,14 @@ async function init(){
   tele({ts:Date.now()/1000,from_agent:"sys",to_agent:"",type:"status_update",payload:"{}",cost_usd:0},
        "MISSION CONTROL ONLINE · "+agents.length+" CREW ON ORBIT");
   maybeWelcome();
+ }catch(e){   // 任一接口失败也别留白屏:显示可见错误 + 自动重试
+  console.error("init failed",e);
+  const ml=$("#manifest-list");
+  if(ml)ml.innerHTML='<div style="padding:16px;color:var(--red);font-size:12px;line-height:1.6">'
+    +'⚠ Mission Control 连接服务器失败:'+esc(String((e&&e.message)||e))
+    +'<br>请确认 crewos 服务在运行;10 秒后自动重试…</div>';
+  setTimeout(()=>location.reload(),10000);
+ }
 }
 
 /* ════════ 名册 ↔ 轨道 双向联动高亮 ════════ */
@@ -1004,8 +1022,10 @@ function connectWS(){
   const ws=new WebSocket(`ws://${location.host}/ws`);
   ws.onmessage=e=>handleEvent(JSON.parse(e.data));
   ws.onclose=()=>{$("#hud-link").innerHTML='UPLINK <span style="color:var(--red)">LOST — RETRY</span>';
+    const lv=$("#tele-live");if(lv){lv.textContent=LANG==="zh"?"断线":"LOST";lv.style.color="var(--red)";}
     setTimeout(connectWS,2500)};
-  ws.onopen=()=>{$("#hud-link").innerHTML='UPLINK <span style="color:var(--green)">LOCKED</span>'};
+  ws.onopen=()=>{$("#hud-link").innerHTML='UPLINK <span style="color:var(--green)">LOCKED</span>';
+    const lv=$("#tele-live");if(lv){lv.textContent=t("live");lv.style.color="var(--green)";}};
 }
 function setCrew(name,state,task){
   const node=$("#node-"+name),row=$("#crew-"+name);
@@ -1111,11 +1131,13 @@ function tele(ev,brief){
                          :(CALLSIGN[ev.from_agent]||ev.from_agent.toUpperCase());
   const cost=ev.cost_usd>0?` <span class="cost">${money(ev.cost_usd)}</span>`:"";
   const box=$("#tele-lines");
+  // 只有用户已经贴着底部时才自动滚;否则别打断他往回翻历史
+  const nearBottom=box.scrollHeight-box.scrollTop-box.clientHeight<60;
   box.insertAdjacentHTML("beforeend",
     `<div class="tl"><span class="ts">${ts}</span> ▸ <span class="${cls}">${route} · ${ev.type.toUpperCase()}</span>${cost}
      ${brief?`<span class="brief">${linkifyBrief(esc(brief))}</span>`:""}</div>`);
   while(box.children.length>300)box.firstChild.remove();
-  box.scrollTop=box.scrollHeight;
+  if(nearBottom)box.scrollTop=box.scrollHeight;
 }
 function alert_(kind,tag,msg){
   const d=document.createElement("div");

@@ -60,7 +60,9 @@ def cmd_onboard(args):
   crewos start                          # 打开 Mission Control
   claude mcp add crewos -- crewos mcp   # 让 Claude Code (CC) 上岗当总指挥
 
-没配 key 也可以先 start,点 RUN SIMULATION 体验全链路。""")
+先在 ~/.crewos/.env 填一个 key(推荐 OPENROUTER_KEY,一把覆盖大多数模型),
+或重跑 crewos onboard 交互录入,然后 crewos start 即可真实派单。
+想先看界面动效不花钱:在线宣传页 https://spikesubingrui-design.github.io/CrewOS/""")
 
 
 def cmd_start(args):

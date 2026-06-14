@@ -587,6 +587,12 @@ def api_put_agent(name: str, cfg: AgentCfg):
         return JSONResponse({"error": "unknown_agent"}, status_code=404)
     if not cfg.channels:
         return JSONResponse({"error": "need_at_least_one_channel"}, status_code=422)
+    for c in cfg.channels:
+        ke = (c.key_env or "")
+        if ke and (not re.fullmatch(r"[A-Z][A-Z0-9_]*", ke) or "sk-" in ke or len(ke) > 40):
+            return JSONResponse({"error": "bad_key_env",
+                "detail": f"通道 {c.name} 的 key_env 像是粘进了 API key。这里只填环境变量名"
+                          f"(如 DEEPSEEK_KEY);API key 去『供应商』面板配置"}, status_code=422)
     doc = {
         "model": cfg.model,
         "channels": [c.model_dump() for c in cfg.channels],
@@ -661,6 +667,11 @@ def validate_config(path: str, content: str) -> str | None:
         for c in chs:
             if not isinstance(c, dict) or not c.get("name") or not c.get("endpoint"):
                 return "每条 channel 需要 name 与 endpoint"
+            ke = str(c.get("key_env", ""))
+            # 防呆:key_env 是环境变量名(如 DEEPSEEK_KEY),不是 API key 本身
+            if ke and (not re.fullmatch(r"[A-Z][A-Z0-9_]*", ke) or "sk-" in ke or len(ke) > 40):
+                return (f"通道 {c.get('name')} 的 key_env 看起来像粘进了 API key。"
+                        f"这里只填环境变量名(如 DEEPSEEK_KEY);API key 请去『供应商』面板配置")
         pricing = doc.get("pricing")
         if (not isinstance(pricing, dict) or "input_per_m" not in pricing
                 or "output_per_m" not in pricing):

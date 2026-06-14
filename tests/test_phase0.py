@@ -84,9 +84,11 @@ def test_all_channels_down():
             router.dispatch("tester", "测试", task_id=task_id)
             assert False, "应抛出 AllChannelsDown"
         except AllChannelsDown as e:
-            assert "backup-model" in str(e)  # 提示可交接的备用模型
+            assert "全部通道不可用" in str(e)  # 含具体失败原因
         types = [e["type"] for e in router.ledger.task_events(task_id)]
-        assert "escalation" in types  # 已上报用户
+        assert "escalation" in types  # 已上报用户;备用模型见 escalation.options
+        esc = [e for e in router.ledger.task_events(task_id) if e["type"] == "escalation"][0]
+        assert "backup-model" in str(esc["payload"])  # 交接备用模型在上报选项里
     print("✅ 全通道宕机→挂起上报(不静默换模型)")
 
 

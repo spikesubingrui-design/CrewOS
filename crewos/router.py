@@ -103,6 +103,26 @@ def load_agent(agents_dir: str | Path, name: str) -> AgentProfile:
     )
 
 
+def _http_error_detail(e: "urllib.error.HTTPError") -> str:
+    """把 HTTPError 解成人话:状态码 + API 返回的 message。
+    401/403=key 无效或没配,404/400 常见=模型 ID 不对,429=限流。"""
+    body = ""
+    try:
+        raw = e.read().decode("utf-8", "ignore")
+        try:
+            j = json.loads(raw)
+            body = (j.get("error", {}).get("message") if isinstance(j.get("error"), dict)
+                    else j.get("error") or j.get("message") or raw)
+        except (ValueError, AttributeError):
+            body = raw
+    except Exception:
+        pass
+    hint = {401: "(key 无效或未配置)", 403: "(无权限/key 问题)",
+            404: "(模型 ID 可能不对)", 400: "(请求被拒,常见是模型 ID 不对)",
+            429: "(限流,稍后再试)"}.get(e.code, "")
+    return f"HTTP {e.code}{hint} {str(body)[:160]}".strip()
+
+
 def _media_part(url: str) -> dict:
     """媒体 URL → OpenAI 兼容 content part(火山方舟 doubao 视频理解同此格式)。"""
     ext = url.split("?")[0].rsplit(".", 1)[-1].lower()
@@ -328,26 +348,38 @@ class Router:
         # 同模型多通道 failover
         result, used_channel, errors = None, None, []
         for ch in agent.channels:
+            # 跳过没配 key 的远程通道(本地 endpoint 如 ollama 不需要 key)
+            local = ch.endpoint.startswith(("mock://", "http://localhost", "http://127."))
+            if ch.key_env and not local and not os.environ.get(ch.key_env):
+                errors.append(f"{ch.name}: 未配置 {ch.key_env}")
+                self.ledger.log(task_id, "failover", "router", name, payload={
+                    "reason": f"通道 {ch.name} 跳过:未配置 key（去『供应商』面板配 {ch.key_env}）"})
+                continue
             try:
                 result = _call_openai_compatible(
                     ch, agent.model, messages, agent.temperature, max_tokens)
                 used_channel = ch.name
                 break
-            except (urllib.error.URLError, urllib.error.HTTPError,
-                    TimeoutError, OSError, KeyError) as e:
+            except urllib.error.HTTPError as e:
+                detail = _http_error_detail(e)
+                errors.append(f"{ch.name}: {detail}")
+                self.ledger.log(task_id, "failover", "router", name, payload={
+                    "reason": f"通道 {ch.name} 失败:{detail}", "error": detail[:300]})
+            except (urllib.error.URLError, TimeoutError, OSError, KeyError) as e:
                 errors.append(f"{ch.name}: {e}")
                 self.ledger.log(task_id, "failover", "router", name, payload={
-                    "reason": f"通道 {ch.name} 失败,尝试下一通道", "error": str(e)[:200]})
+                    "reason": f"通道 {ch.name} 连接失败,尝试下一通道", "error": str(e)[:200]})
 
         if result is None:
+            why = " | ".join(errors) or "无可用通道"
             self.ledger.log(task_id, "escalation", "router", "user", payload={
-                "reason": f"{name}({agent.model}) 全部通道不可用,任务挂起",
+                "reason": f"{name}({agent.model}) 全部通道不可用:{why}",
                 "errors": errors,
-                "options": ["等待恢复(心跳探测中)",
+                "options": ["按上面的具体原因修(多半是没配 key 或模型 ID 不对)",
+                            "等待恢复(心跳探测中)",
                             f"授权交接式换模型 → {agent.fallback_model or '未配置备用'}"]})
             raise AllChannelsDown(
-                f"{name} 的模型 {agent.model} 全部通道不可用。"
-                f"可等待恢复,或授权交接给备用模型 {agent.fallback_model or '(未配置)'}。")
+                f"{name}({agent.model}) 全部通道不可用 —— {why}")
 
         cost = (result["tokens_in"] * agent.price_in_per_m
                 + result["tokens_out"] * agent.price_out_per_m) / 1_000_000

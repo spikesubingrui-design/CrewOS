@@ -49,7 +49,7 @@ def _settings() -> dict:
     base = {"default_task_budget_usd": 2.0, "monthly_warn_usd": 120.0,
             "feishu_webhook": "", "webhook_url": "", "dashboard_token": "",
             "watchdog_suspicious_minutes": 5.0, "watchdog_critical_minutes": 15.0,
-            "monthly_hard_usd": 0.0}
+            "monthly_hard_usd": 0.0, "ceo_model": "", "ceo_provider": ""}
     if f.exists():
         base.update(yaml.safe_load(f.read_text(encoding="utf-8")) or {})
     return base
@@ -351,6 +351,36 @@ async def api_dispatch(req: DispatchReq):
         return JSONResponse({"error": "dispatch_failed", "detail": str(e)}, status_code=500)
 
 
+class CeoReq(BaseModel):
+    goal: str
+
+
+@app.post("/api/ceo")
+async def api_ceo(req: CeoReq):
+    """Web 端 CEO 自动编排:输入目标 → 规划 → 派单 → 汇总(后台线程跑,看板直播)。"""
+    from . import providers as provcat
+    from .ceo import orchestrate
+    s = _settings()
+    model = (s.get("ceo_model") or "").strip()
+    pid = (s.get("ceo_provider") or "").strip()
+    if not model or not pid:
+        return JSONResponse({"error": "ceo_not_configured",
+                             "detail": "请在 CONFIG → 总指挥 设置 CEO 模型与供应商"}, status_code=409)
+    prov = provcat.get_provider(ROOT, pid)
+    if not prov:
+        return JSONResponse({"error": "unknown_provider"}, status_code=404)
+    if not _env_has(prov["key_env"]):
+        return JSONResponse({"error": "ceo_no_key",
+                             "detail": f"CEO 供应商 {prov['name']} 还没配 key"}, status_code=409)
+    tid = _ledger().new_task(req.goal[:80], created_by="user")
+
+    def run():
+        orchestrate(_router(), model, prov["endpoint"], prov["key_env"],
+                    req.goal, task_id=tid)
+    asyncio.get_running_loop().run_in_executor(None, run)
+    return {"ok": True, "task_id": tid, "mode": "ceo_orchestrate"}
+
+
 class BudgetReq(BaseModel):
     budget_usd: float
 
@@ -520,7 +550,7 @@ def api_put_settings(body: dict):
                 if k in ("default_task_budget_usd", "monthly_warn_usd",
                          "feishu_webhook", "webhook_url", "dashboard_token",
                          "monthly_hard_usd", "watchdog_suspicious_minutes",
-                         "watchdog_critical_minutes")})
+                         "watchdog_critical_minutes", "ceo_model", "ceo_provider")})
     f.write_text(yaml.safe_dump(cur, allow_unicode=True), encoding="utf-8")
     return cur
 

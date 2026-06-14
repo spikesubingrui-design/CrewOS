@@ -85,3 +85,27 @@ def test_recall_failsafe_on_gbrain_error(monkeypatch):
         monkeypatch.setattr(umemory.subprocess, "run",
                             lambda *a, **k: (_ for _ in ()).throw(subprocess.TimeoutExpired("gbrain", 25)))
         assert umemory.recall("x", _settings(tmp)) == ""
+
+
+# ── v0.14:提示词 + 编排纪律升级 ──
+from crewos import ceo as _ceo
+
+
+def test_ceo_prompts_carry_superpowers_discipline():
+    """CEO 规划要求每个派单含验收标准;验收要对照标准 + 机器检查判定。"""
+    assert "验收标准" in _ceo.PLAN_SYSTEM and "输出格式" in _ceo.PLAN_SYSTEM
+    assert "direct" in _ceo.PLAN_SYSTEM        # 简单任务直接答仍在
+    assert "验收" in _ceo.REVIEW_SYSTEM
+    assert "check_failures" in _ceo.REVIEW_SYSTEM   # 验收看机器检查标红
+
+
+def test_agent_role_prompts_are_strong_contracts():
+    """7 个 role.md 都应是强约束契约:含验收自查清单 + 输出契约 + SUMMARY + 记忆钩子。"""
+    base = Path(__file__).parent.parent / "crewos" / "templates" / "agents"
+    for a in ("coder", "writer", "researcher", "analyst", "builder", "runner", "perceiver"):
+        txt = (base / a / "role.md").read_text(encoding="utf-8")
+        assert "验收自查清单" in txt, f"{a} 缺验收自查清单"
+        assert "输出契约" in txt, f"{a} 缺输出契约"
+        assert "SUMMARY:" in txt, f"{a} 缺 SUMMARY 行"
+        assert "来自 U" in txt, f"{a} 缺 U 召回钩子"
+        assert "【验收标准】" in txt, f"{a} 未引用 instruction 的验收标准"

@@ -56,18 +56,32 @@ def save_deliverable(root: str | Path, task_id: str, agent: str, content: str) -
         saved.append(rel(fn))
     return saved
 
-PLAN_SYSTEM = """你是 CrewOS 的总指挥(CEO)。你只决策,不亲自执行专业活,但你很聪明。
-先判断这个目标值不值得动用团队:
-- 如果是寒暄、常识问答、简单算术、一句话就能回答的,**你直接答**,别浪费 token 调用专业成员——
-  输出 JSON 对象 {"direct": "你的回答"}。
-- 如果确实需要专业能力(写作/编码/研究/数据/行政/批量/视频理解),才拆解派单——
-  输出 JSON 数组,每项 {"agent": "成员名", "instruction": "明确指令(含目标+验收要求)"}。
-派单规则:中文创作→writer,代码→coder,研究/搜资料→researcher,数据/计算→analyst,
-行政/合同/邮件→builder,批量/转换→runner,视频/图像理解→perceiver。
-简单专业目标 1 个派单,复合目标 2-4 个。只输出 JSON,不要任何额外文字。"""
+PLAN_SYSTEM = """你是 CrewOS 的总指挥(CEO)。你只决策、不亲自执行专业活,但你很聪明、有纪律。
 
-REVIEW_SYSTEM = """你是 CrewOS 总指挥。下面是你派出的各成员的产出。
-用 2-4 句中文总结交付结果、是否达成目标、还差什么。简洁,直接说结论。"""
+第一步:判断目标值不值得动用团队。
+- 寒暄 / 常识问答 / 简单算术 / 一句话就能回答的 → **你直接答**,别浪费 token——
+  输出 JSON 对象 {"direct": "你的回答"}。
+- 确实需要专业能力(写作/编码/研究/数据/行政/批量/视频理解)→ 拆解派单,输出 JSON 数组。
+
+拆解时,给每个派单写一条**高质量 instruction(单个字符串)**,必须含以下四段,缺一不可:
+1. 目标:这个子任务要达成什么(一句话)。
+2. 要求:关键约束(平台/字数/语言/技术栈/边界/明确不要做什么)。
+3. 验收标准:2-4 条**客观可判定**的成品标准(如「单文件 HTML 双击即运行」「含碰撞检测与重新开始」「字数≤300」),
+   这是成员产出要过的关,也是你最后验收的依据。
+4. 输出格式:产物形态(如「单个 ```html 代码块 + 一行 SUMMARY」)。
+
+派单规则:中文创作→writer,代码→coder,研究/搜资料→researcher,数据/计算→analyst,
+行政/合同/邮件→builder,批量/格式转换→runner,视频/图像理解→perceiver。
+简单专业目标派 1 个;复合目标拆 2-4 个**互相独立、可并行**的子任务,别把一件事拆成依赖链。
+只输出 JSON(对象或数组),不要任何额外文字,不要用 markdown 代码块包裹 JSON。"""
+
+REVIEW_SYSTEM = """你是 CrewOS 总指挥,现在做**交付验收**(不是夸产物)。
+给你:原始目标、各成员产出预览、机器检查结果(checks)。
+逐项对照「目标与各自的验收标准」严格判断,用中文输出:
+1. 结论:✅ 达成 / ⚠️ 部分达成 / ❌ 未达成。
+2. 逐成员:产出是否满足其验收标准;机器检查是否标红(check_failures 非空即标红)。
+3. 缺口:还差什么(具体、可执行);若需返工,点名是谁、改哪里。
+2-5 句,直说结论,不要复述产物内容。"""
 
 
 def _roster_desc(router) -> str:
@@ -188,8 +202,13 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
             paths = save_deliverable(root, task_id, step["agent"], content)   # 完整存盘
             deliverables.append((step["agent"], paths))
             preview = content[:800]
-            results.append(f"【{step['agent']}】{preview}"
-                           + ("…(完整产出已存盘)" if len(content) > 800 else ""))
+            # 机器检查结果一并喂给验收(CEO 据此判定是否标红/返工)
+            chk = r.get("checks") or {}
+            fails = chk.get("failures") or []
+            chkline = (f"  [机器检查:{'全过 ✓' if not fails else '标红 ✗ → '+'; '.join(map(str, fails))[:160]}]"
+                       if (chk.get("passed") is not None or fails) else "")
+            results.append(f"【{step['agent']} · 验收依据见其 instruction】{preview}"
+                           + ("…(完整产出已存盘)" if len(content) > 800 else "") + chkline)
         except Exception as e:
             results.append(f"【{step['agent']}】(失败:{str(e)[:80]})")
 

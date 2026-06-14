@@ -83,7 +83,8 @@ nav{display:flex;gap:4px;height:100%}
 #orbitsvg{position:absolute;inset:0;width:100%;height:100%}
 .node{position:absolute;z-index:4;transform:translate(-50%,-50%);text-align:center;cursor:pointer;width:120px}
 .node .core{width:14px;height:14px;border-radius:50%;margin:0 auto;background:#16203a;
-  border:1.5px solid var(--line-strong);transition:.3s;position:relative}
+  border:1.5px solid var(--agent,var(--line-strong));box-shadow:0 0 7px var(--agent,transparent);
+  transition:.3s;position:relative}
 .node.engaged .core{background:var(--green);border-color:var(--green);box-shadow:0 0 16px var(--green)}
 .node.offline .core{background:#3a1518;border-color:var(--red);box-shadow:0 0 10px rgba(255,92,92,.5)}
 .node.engaged .core::after{content:"";position:absolute;inset:-7px;border:1px solid rgba(46,229,157,.5);
@@ -109,6 +110,9 @@ nav{display:flex;gap:4px;height:100%}
 .pulse-dot.ret{background:var(--green);box-shadow:0 0 10px var(--green)}
 #orbit-hud{position:absolute;left:16px;top:13px;z-index:5;line-height:2}
 #orbit-hud div::before{content:"▮ ";color:var(--blue)}
+#orbit-ctl{position:absolute;right:14px;top:12px;z-index:6;display:flex;align-items:center;gap:8px}
+#orbit-ctl select{font-size:10px;padding:6px 8px;background:var(--panel-solid);border:1px solid var(--line);
+  color:var(--text);border-radius:2px;outline:none}
 
 /* 遥测 */
 #telemetry{display:flex;flex-direction:column;overflow:hidden}
@@ -184,6 +188,30 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
   border:1px solid;border-radius:1px}
 .chip.ok{color:var(--green);border-color:rgba(46,229,157,.4)}
 .chip.no{color:var(--amber);border-color:rgba(255,180,84,.4)}
+/* 可折叠面板 */
+.collapsible .panel-h{cursor:pointer;user-select:none}
+.collapsible .panel-h:hover{background:rgba(150,180,255,.04)}
+.ctoggle{color:var(--dim);font-weight:700;font-size:15px;margin-left:10px;width:14px;text-align:center}
+.collapsible.open .ctoggle{color:var(--ice)}
+
+/* 角色卡(乘组 LLM 配置 hero) */
+#crew-setup{padding:0}
+.role-card{padding:13px 16px;border-bottom:1px solid var(--line)}
+.role-card:last-child{border-bottom:none}
+.role-card.ceo{background:rgba(79,124,255,.06)}
+.rc-top{display:flex;align-items:center;gap:10px;margin-bottom:9px;flex-wrap:wrap}
+.rc-name{font-weight:600;font-size:12.5px;letter-spacing:.06em}
+.rc-role{font-size:10px;color:var(--dim)}
+.rc-status{margin-left:auto}
+.rc-grid{display:grid;grid-template-columns:1.4fr 1.4fr auto auto;gap:8px;align-items:center}
+.rc-grid input,.rc-grid select{font-size:11.5px;padding:8px 10px}
+.rc-grid .btn{padding:8px 12px;font-size:9.5px;white-space:nowrap}
+.rc-key{display:none;grid-template-columns:1fr auto;gap:8px;margin-top:8px}
+.rc-key.show{display:grid}
+.rc-key input{font-size:11.5px;padding:8px 10px}
+.rc-keynote{font-size:9.5px;color:var(--dim);margin-top:6px}
+@media(max-width:680px){.rc-grid{grid-template-columns:1fr 1fr}}
+
 /* 供应商面板 */
 .provcard{background:rgba(79,124,255,.06);border:1px solid var(--line-strong);border-radius:3px;
   padding:13px 15px;margin-top:6px}
@@ -349,6 +377,15 @@ input[type=password]:focus{border-color:var(--blue)}
         <div>ORBITAL VIEW · LEO</div>
         <div id="hud-link">UPLINK <span style="color:var(--green)">LOCKED</span></div>
       </div>
+      <div id="orbit-ctl">
+        <span class="micro" data-i18n="orbit_size">节点大小</span>
+        <select id="orbit-size" onchange="applyCrewVisuals()">
+          <option value="uniform" data-i18n="size_uniform">均匀</option>
+          <option value="tasks" data-i18n="size_tasks">按任务数</option>
+          <option value="cost" data-i18n="size_cost">按成本</option>
+          <option value="tokens" data-i18n="size_tokens">按 token</option>
+        </select>
+      </div>
       <div id="cmd-node">
         <div class="core"></div>
         <div class="cs">CDR · FABLE-5</div>
@@ -400,48 +437,25 @@ input[type=password]:focus{border-color:var(--blue)}
 
 <!-- CONFIG -->
 <div class="view" id="view-config">
+  <!-- HERO:角色优先的 LLM 配置(CEO + 每个 agent 一张卡,内联配 key) -->
+  <div class="panel" id="setup-panel">
+    <div class="panel-h"><span class="micro" data-i18n="setup_title">乘组 LLM 配置 · 给谁配一目了然</span>
+      <span class="micro" style="color:var(--dim)" id="setup-count">—</span></div>
+    <div class="cfg-body" id="crew-setup"></div>
+  </div>
+
   <div id="config-grid">
     <div>
-      <div class="panel">
-        <div class="panel-h"><span class="micro" data-i18n="ceo_panel">Commander / 总指挥(CEO 自动编排)</span></div>
-        <div class="cfg-body">
-          <div class="provnote" style="margin-bottom:10px" data-i18n="ceo_note">TRANSMIT 选「CDR·CEO 自动编排」时,用这里配的模型对目标做规划→派单→汇总。推荐选强推理模型(如 deepseek-v4-pro / claude / gpt)。</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-            <div class="frow" style="margin-bottom:0"><label class="micro" data-i18n="ceo_provider">CEO 供应商</label>
-              <select id="s-ceo-provider" style="width:100%"></select></div>
-            <div class="frow" style="margin-bottom:0"><label class="micro" data-i18n="ceo_model">CEO 模型 ID</label>
-              <input type="text" id="s-ceo-model" placeholder="deepseek-v4-pro" style="width:100%"></div>
-          </div>
-          <button class="btn" style="margin-top:12px" onclick="saveCeo()" data-i18n="ceo_commit">COMMIT CEO</button>
-          <span class="micro" id="s-ceo-status" style="margin-left:10px"></span>
-        </div>
-      </div>
-      <div class="panel" style="margin-top:16px">
-        <div class="panel-h"><span class="micro">Fuel Limits / 预算</span></div>
-        <div class="cfg-body">
-          <div class="frow"><label class="micro">单任务燃料上限 USD — 超限自动熔断</label>
-            <input type="number" id="s-budget" step="0.5" min="0.1"></div>
-          <div class="frow"><label class="micro">月度警戒线 USD</label>
-            <input type="number" id="s-warn" step="10" min="10"></div>
-          <div class="frow"><label class="micro">Security Protocols — DLP 黑名单(每行一条,绝不外泄)</label>
-            <textarea id="s-blocklist"></textarea></div>
-          <div class="frow"><label class="micro">Comms Relay — 飞书机器人 webhook(任务交付/上报/审批推送到飞书)</label>
-            <input type="text" id="s-feishu" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" style="width:100%"></div>
-          <div class="frow"><label class="micro">通用 webhook(可选,POST JSON)</label>
-            <input type="text" id="s-webhook" placeholder="https://…" style="width:100%"></div>
-          <div class="frow"><label class="micro">Access Token(可选 — 从局域网/隧道访问时必配,留空关闭)</label>
-            <input type="text" id="s-token" placeholder="设置后访问需带 ?token=…" style="width:100%"></div>
-          <button class="btn" onclick="saveSettings()">COMMIT</button>
-        </div>
-      </div>
-      <div class="panel" style="margin-top:16px">
-        <div class="panel-h"><span class="micro" data-i18n="prov_title">Providers / 供应商 · 选择后配 key</span>
-          <span class="micro" style="color:var(--dim)" id="prov-count">—</span></div>
+      <div class="panel collapsible">
+        <div class="panel-h" onclick="toggleCollapse(this)"><span class="micro" data-i18n="prov_title">供应商总览 / 自定义</span>
+          <span class="ctoggle">＋</span></div>
+        <div class="cbody" style="display:none">
         <div class="cfg-body">
           <div id="prov-configured"></div>
           <div class="frow"><label class="micro" data-i18n="prov_pick">选择供应商(市面常见全集)</label>
             <select id="prov-select" onchange="provSelect()" style="width:100%"></select></div>
           <div id="prov-config"></div>
+          <span class="micro" style="color:var(--dim)" id="prov-count">—</span>
         </div>
         <div class="cfg-body" style="border-top:1px solid var(--line)">
           <div class="micro" style="margin-bottom:10px;color:var(--ice)" data-i18n="custom_prov">+ CUSTOM PROVIDER(任何 OpenAI 兼容端点)</div>
@@ -454,18 +468,45 @@ input[type=password]:focus{border-color:var(--blue)}
             <button class="btn" onclick="addCustomProvider()" data-i18n="add_prov">+ ADD PROVIDER</button>
           </div>
         </div>
+        </div>
       </div>
-      <div class="panel" style="margin-top:16px">
-        <div class="panel-h"><span class="micro">Crew Performance / 模型胜任度</span>
-          <span class="micro" id="ev-samples">--</span></div>
-        <div class="cfg-body" id="evals" style="font-size:11px"></div>
+      <div class="panel collapsible" style="margin-top:16px">
+        <div class="panel-h" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_budget">预算 / 安全 / 通知</span>
+          <span class="ctoggle">＋</span></div>
+        <div class="cbody" style="display:none">
+        <div class="cfg-body">
+          <div class="frow"><label class="micro">单任务燃料上限 USD — 超限自动熔断</label>
+            <input type="number" id="s-budget" step="0.5" min="0.1"></div>
+          <div class="frow"><label class="micro">月度警戒线 USD</label>
+            <input type="number" id="s-warn" step="10" min="10"></div>
+          <div class="frow"><label class="micro">DLP 黑名单(每行一条,绝不外泄)</label>
+            <textarea id="s-blocklist"></textarea></div>
+          <div class="frow"><label class="micro">飞书机器人 webhook(交付/上报/审批推送)</label>
+            <input type="text" id="s-feishu" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" style="width:100%"></div>
+          <div class="frow"><label class="micro">通用 webhook(可选,POST JSON)</label>
+            <input type="text" id="s-webhook" placeholder="https://…" style="width:100%"></div>
+          <div class="frow"><label class="micro">Access Token(局域网/隧道访问必配,留空关闭)</label>
+            <input type="text" id="s-token" placeholder="设置后访问需带 ?token=…" style="width:100%"></div>
+          <button class="btn" onclick="saveSettings()">COMMIT</button>
+        </div>
+        </div>
+      </div>
+      <div class="panel collapsible" style="margin-top:16px">
+        <div class="panel-h" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_perf">模型胜任度 / Performance</span>
+          <span class="ctoggle">＋</span></div>
+        <div class="cbody" style="display:none">
+          <div class="cfg-body"><span class="micro" id="ev-samples" style="color:var(--dim)">--</span>
+            <div id="evals" style="font-size:11px;margin-top:8px"></div></div>
+        </div>
       </div>
     </div>
     <div>
-      <div class="panel">
-        <div class="panel-h"><span class="micro">Crew LLM Assignment / 大脑配置</span>
-          <span class="micro" style="color:var(--dim)">换脑不换人 — 记忆与错题本全部留任</span></div>
+      <div class="panel collapsible">
+        <div class="panel-h" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_adv">高级:逐通道 LLM 绑定 / failover</span>
+          <span class="ctoggle">＋</span></div>
+        <div class="cbody" style="display:none">
         <div class="cfg-body">
+          <div class="provnote" style="margin-bottom:10px">普通配置用上面的「乘组 LLM 配置」即可。这里给需要同模型多通道 failover、手填定价的高级用户。</div>
           <div class="frow"><label class="micro">Crew member</label>
             <select id="llm-agent" onchange="llmLoad()" style="width:100%"></select></div>
           <div id="llm-rec"></div>
@@ -476,9 +517,9 @@ input[type=password]:focus{border-color:var(--blue)}
           </div>
           <div class="micro" style="margin:14px 0 6px;color:var(--dim)">— 或手动精调 —</div>
           <div style="display:grid;grid-template-columns:2fr 2fr 1fr;gap:12px">
-            <div class="frow"><label class="micro">Model ID(OpenAI 兼容名)</label>
+            <div class="frow"><label class="micro">Model ID</label>
               <input type="text" id="llm-model" style="width:100%"></div>
-            <div class="frow"><label class="micro">Fallback model(交接备用,需授权)</label>
+            <div class="frow"><label class="micro">Fallback model</label>
               <input type="text" id="llm-fallback" style="width:100%"></div>
             <div class="frow"><label class="micro">Temp</label>
               <input type="number" id="llm-temp" step="0.1" min="0" max="2" style="width:100%"></div>
@@ -496,14 +537,17 @@ input[type=password]:focus{border-color:var(--blue)}
           <button class="btn solid" onclick="llmSave()">COMMIT ASSIGNMENT</button>
           <span class="micro" id="llm-status" style="margin-left:12px"></span>
         </div>
+        </div>
       </div>
-      <div class="panel" style="margin-top:16px">
-        <div class="panel-h"><span class="micro">Crew Dossiers / 档案编辑</span>
-          <span class="micro" id="f-status"></span></div>
+      <div class="panel collapsible" style="margin-top:16px">
+        <div class="panel-h" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_dossier">档案编辑 / Dossiers</span>
+          <span class="micro" id="f-status"></span><span class="ctoggle">＋</span></div>
+        <div class="cbody" style="display:none">
         <div class="cfg-body">
           <div class="frow"><select id="f-select" onchange="loadFile()" style="width:100%"></select></div>
           <textarea id="f-content" spellcheck="false"></textarea>
           <div style="margin-top:14px"><button class="btn" onclick="saveFile()">COMMIT DOSSIER</button></div>
+        </div>
         </div>
       </div>
     </div>
@@ -574,6 +618,15 @@ setInterval(()=>{
 /* ════════ 状态 ════════ */
 const CALLSIGN={coder:"CODER-1",writer:"WRITER-1",researcher:"RECON-1",analyst:"ANLYT-1",
   builder:"BUILD-1",runner:"CARGO-1",perceiver:"OPTIC-1"};
+// 每个 agent 固定一种主题色(节点核心/名号/脉冲同色)
+const AGENT_COLORS={researcher:"#4f7cff",writer:"#2ee59d",coder:"#ff5c5c",analyst:"#ffb454",
+  builder:"#b79cff",runner:"#46d6e5",perceiver:"#ff7ac0"};
+const PALETTE=["#4f7cff","#2ee59d","#ff5c5c","#ffb454","#b79cff","#46d6e5","#ff7ac0","#9db8ff"];
+function colorOf(name){
+  if(AGENT_COLORS[name])return AGENT_COLORS[name];
+  let i=0;for(const c of name||"")i=(i+c.charCodeAt(0))%PALETTE.length;return PALETTE[i];
+}
+let crewUsage={};
 const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
 const esc=s=>(s||"").replace(/</g,"&lt;");
 
@@ -617,6 +670,14 @@ const I18N={
   cost_saved:{zh:"对比纯 Opus 估算节省",en:"Est. saved vs all-Opus"},
   w_back:{zh:"上一步",en:"Back"},w_next:{zh:"下一步 ▸",en:"Next ▸"},
   w_skip:{zh:"跳过",en:"Skip"},w_done:{zh:"开始使用 ✓",en:"Get started ✓"},
+  setup_title:{zh:"乘组 LLM 配置 · 给谁配一目了然",en:"Crew LLM Setup · clear who gets what"},
+  sec_budget:{zh:"预算 / 安全 / 通知",en:"Budget / Security / Notify"},
+  sec_perf:{zh:"模型胜任度 / Performance",en:"Model Performance"},
+  sec_adv:{zh:"高级:逐通道 LLM 绑定 / failover",en:"Advanced: per-channel LLM / failover"},
+  sec_dossier:{zh:"档案编辑 / Dossiers",en:"Dossiers / raw config"},
+  orbit_size:{zh:"节点大小",en:"Node size"},
+  size_uniform:{zh:"均匀",en:"Uniform"},size_tasks:{zh:"按任务数",en:"By tasks"},
+  size_cost:{zh:"按成本",en:"By cost"},size_tokens:{zh:"按 token",en:"By tokens"},
 };
 function t(k){return (I18N[k]||{})[LANG]||(I18N[k]||{}).en||k}
 function applyI18n(){
@@ -689,9 +750,10 @@ async function init(){
   });
   providers=await (await fetch("/api/providers")).json();
   recs=await (await fetch("/api/recommendations")).json();
-  layoutOrbit();orbitTick();loadProviders();llmInit();loadCost();loadSettings();loadFile();connectWS();
-  loadApprovals();loadEvals();renderNoKeyBar();applyI18n();await backfill();
+  layoutOrbit();orbitTick();loadProviders();renderCrewSetup();llmInit();loadCost();loadSettings();loadFile();connectWS();
+  loadApprovals();loadEvals();renderNoKeyBar();applyI18n();loadCrewUsage();await backfill();
   setInterval(loadCost,15000);setInterval(loadApprovals,20000);setInterval(loadEvals,60000);
+  setInterval(loadCrewUsage,30000);
   tele({ts:Date.now()/1000,from_agent:"sys",to_agent:"",type:"status_update",payload:"{}",cost_usd:0},
        "MISSION CONTROL ONLINE · "+agents.length+" CREW ON ORBIT");
   maybeWelcome();
@@ -843,17 +905,40 @@ function orbitTick(){
   requestAnimationFrame(orbitTick);
 }
 
+/* ════════ 节点配色 + 按用量缩放 ════════ */
+async function loadCrewUsage(){
+  try{crewUsage=await (await fetch("/api/crew-usage")).json();}catch(e){crewUsage={}}
+  applyCrewVisuals();
+}
+function applyCrewVisuals(){
+  const metric=$("#orbit-size")?.value||"uniform";
+  const vals=agents.map(a=>(crewUsage[a.name]||{})[metric]||0);
+  const max=Math.max(...vals,1e-9);
+  for(const a of agents){
+    const node=$("#node-"+a.name);if(!node)continue;
+    const core=node.querySelector(".core"),col=colorOf(a.name),cs=node.querySelector(".cs");
+    node.style.setProperty("--agent",col);   // 经 CSS 变量上色,engaged/offline 状态仍可覆盖
+    if(cs)cs.style.color=col;
+    // 尺寸:均匀=14px;否则 11–30px 按 metric 占比
+    const v=(crewUsage[a.name]||{})[metric]||0;
+    const sz=metric==="uniform"?14:Math.round(11+(v/max)*19);
+    core.style.width=sz+"px";core.style.height=sz+"px";
+  }
+}
+
 /* ════════ 光脉冲传输 ════════ */
 function pulse(from,to,ret){
   const a=nodePos[from],b=nodePos[to];if(!a||!b)return;
   const f=$("#orbitfield");
+  const col=ret?colorOf(to):colorOf(from);   // 脉冲用涉及 agent 的主题色
   const line=document.createElementNS("http://www.w3.org/2000/svg","line");
   line.setAttribute("x1",a.x);line.setAttribute("y1",a.y);
   line.setAttribute("x2",b.x);line.setAttribute("y2",b.y);
-  line.setAttribute("stroke",ret?"rgba(46,229,157,.4)":"rgba(157,184,255,.4)");
+  line.setAttribute("stroke",col+"66");
   line.setAttribute("stroke-width","1");line.setAttribute("stroke-dasharray","3 5");
   $("#txlines").appendChild(line);
-  const d=document.createElement("div");d.className="pulse-dot"+(ret?" ret":"");f.appendChild(d);
+  const d=document.createElement("div");d.className="pulse-dot"+(ret?" ret":"");
+  d.style.background=col;d.style.boxShadow=`0 0 10px ${col},0 0 22px ${col}`;f.appendChild(d);
   const t1=performance.now(),dur=820;
   (function step(t){
     const k=Math.min(1,(t-t1)/dur),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
@@ -1180,7 +1265,7 @@ async function useRecommended(){
   const d=await r.json();
   alert_(d.key_set?"info":"warn","ASSIGNMENT",
     `${CALLSIGN[name]||name} → ${model} @ ${provName(pid)}`+(d.key_set?"":" — 该供应商还没配 key,记得去上面粘"));
-  agents=await (await fetch("/api/agents")).json();llmInit();
+  agents=await (await fetch("/api/agents")).json();llmInit();renderCrewSetup();
   const a=agents.find(x=>x.name===name);
   const md=$("#node-"+name+" .md");if(md)md.textContent=a.model;
   const row=$("#crew-"+name+" .md");if(row)row.textContent=a.model;
@@ -1209,7 +1294,7 @@ async function llmSave(){
   $("#llm-status").textContent="COMMITTED";
   alert_("info","ASSIGNMENT",`${CALLSIGN[name]||name} → ${body.model}(记忆与错题本留任)`);
   agents=await (await fetch("/api/agents")).json();
-  llmInit();
+  llmInit();renderCrewSetup();
   const a=agents.find(x=>x.name===name);
   const md=$("#node-"+name+" .md");if(md)md.textContent=a.model;
   const row=$("#crew-"+name+" .md");if(row)row.textContent=a.model;
@@ -1276,7 +1361,108 @@ async function addCustomProvider(){
   $("#cp-name").value="";$("#cp-endpoint").value="";$("#cp-key").value="";
   alert_("info","PROVIDER","自定义供应商已添加");
   providers=await (await fetch("/api/providers")).json();
-  loadProviders();llmLoad();renderNoKeyBar();
+  loadProviders();llmLoad();renderNoKeyBar();renderCrewSetup();
+}
+
+/* ════════ 可折叠面板 ════════ */
+function toggleCollapse(h){
+  const panel=h.closest(".collapsible"),body=panel.querySelector(".cbody"),
+        open=body.style.display==="none";
+  body.style.display=open?"":"none";panel.classList.toggle("open",open);
+  const tg=h.querySelector(".ctoggle");if(tg)tg.textContent=open?"－":"＋";
+}
+
+/* ════════ 乘组 LLM 配置(角色优先 hero:CEO + 每个 agent 一张卡) ════════ */
+let _ceoCfg={ceo_model:"",ceo_provider:""};
+function provById(id){return providers.find(p=>p.id===id)}
+function roleProvider(a){  // 从 agent 当前通道反推它用的是哪个供应商
+  const ch=(a.channels||[])[0];if(!ch)return null;
+  return providers.find(p=>p.key_env===ch.key_env)||providers.find(p=>p.id===ch.name)||null;
+}
+function provOptions(sel){
+  const g={};for(const p of providers)(g[p.group||"其他"]=g[p.group||"其他"]||[]).push(p);
+  const order=["聚合网关","国际直连","国内直连","本地自托管","自定义","其他"];
+  return order.filter(x=>g[x]).map(x=>`<optgroup label="${x}">`+g[x].map(p=>
+    `<option value="${p.id}"${p.id===sel?" selected":""}>${p.key_set?"✓ ":""}${esc(p.name)}</option>`).join("")+`</optgroup>`).join("");
+}
+function roleCard(key,name,role,model,provId,withRec){
+  const p=provById(provId);
+  const chip=p?(p.key_set?`<span class="chip ok rc-status">✓ ${esc(p.name.split(" ")[0])} key</span>`
+                        :`<span class="chip no rc-status">缺 ${esc(p.name.split(" ")[0])} key</span>`)
+              :`<span class="chip no rc-status">未选供应商</span>`;
+  return `<div class="role-card ${key==='__ceo__'?'ceo':''}" id="rc-${key}">
+    <div class="rc-top"><span class="rc-name">${esc(name)}</span><span class="rc-role">${esc(role)}</span>${chip}</div>
+    <div class="rc-grid">
+      <input type="text" id="rcm-${key}" value="${esc(model||"")}" placeholder="模型 ID">
+      <select id="rcp-${key}" onchange="roleKeyRow('${key}')">${provOptions(provId)}</select>
+      ${withRec?`<button class="btn" onclick="roleUseRec('${key}')">用推荐</button>`:`<span></span>`}
+      <button class="btn solid" onclick="roleSave('${key}')">保存</button>
+    </div>
+    <div class="rc-key" id="rck-${key}">
+      <input type="password" id="rckin-${key}" placeholder="">
+      <button class="btn" onclick="roleSaveKey('${key}')">保存 key</button>
+    </div>
+    <div class="rc-keynote" id="rckn-${key}"></div>
+  </div>`;
+}
+async function renderCrewSetup(){
+  const box=$("#crew-setup");if(!box)return;
+  _ceoCfg=await (await fetch("/api/settings")).json();
+  let html=roleCard("__ceo__","CDR · CEO","总指挥 · 拆解/派单/审阅",
+                    _ceoCfg.ceo_model,_ceoCfg.ceo_provider,false);
+  for(const a of agents){
+    const p=roleProvider(a);
+    html+=roleCard(a.name,(CALLSIGN[a.name]||a.name),(CREW_BLURB[a.name]||""),a.model,p?p.id:"",true);
+  }
+  box.innerHTML=html;
+  const keyed=providers.filter(x=>x.key_set).length;
+  $("#setup-count").textContent=`${keyed}/${providers.length} 供应商已配 key`;
+  ["__ceo__",...agents.map(a=>a.name)].forEach(roleKeyRow);
+}
+function roleKeyRow(key){   // 根据当前选中的供应商,刷新该卡的 key 状态与输入行
+  const pid=$("#rcp-"+key)?.value,p=provById(pid);if(!p)return;
+  const card=$("#rc-"+key),chip=card.querySelector(".rc-status");
+  chip.className="chip rc-status "+(p.key_set?"ok":"no");
+  chip.textContent=(p.key_set?"✓ ":"缺 ")+p.name.split(" ")[0]+" key";
+  const krow=$("#rck-"+key);
+  $("#rckin-"+key).placeholder=p.key_set?`${p.key_env} 已配 — 输入可覆盖`:`为 ${p.name} 粘 API key`;
+  krow.classList.toggle("show",!p.key_set);   // 缺 key 时自动展开输入行
+  $("#rckn-"+key).textContent=p.key_set?"":`这个 key 写入 ${p.key_env},所有用 ${p.name} 的成员共享`;
+}
+function roleUseRec(key){
+  const rec=recs[key];if(!rec)return;
+  $("#rcm-"+key).value=rec.model;
+  const pref=(rec.providers||[]).find(id=>provById(id)?.key_set)||rec.providers[0];
+  if(pref)$("#rcp-"+key).value=pref;
+  roleKeyRow(key);
+  alert_("info","推荐",`${CALLSIGN[key]||key} → ${rec.model}(${rec.reason.slice(0,30)}…)`);
+}
+async function roleSave(key){
+  const model=$("#rcm-"+key).value.trim(),pid=$("#rcp-"+key).value;
+  if(!model){alert_("err","CONFIG","请填模型 ID");return}
+  if(key==="__ceo__"){
+    const r=await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ceo_model:model,ceo_provider:pid})});
+    if(r.ok)alert_("info","CEO",`总指挥 → ${model} @ ${provById(pid)?.name||pid}`);
+  }else{
+    const r=await fetch("/api/agent/"+key+"/bind",{method:"PUT",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model,provider_id:pid})});
+    if(!r.ok){const e=await r.json();alert_("err","CONFIG",e.detail||e.error||"失败");return}
+    alert_("info","ASSIGNMENT",`${CALLSIGN[key]||key} → ${model} @ ${provById(pid)?.name||pid}`);
+    agents=await (await fetch("/api/agents")).json();
+    const a=agents.find(x=>x.name===key),md=$("#node-"+key+" .md"),row=$("#crew-"+key+" .md");
+    if(a&&md)md.textContent=a.model;if(a&&row)row.textContent=a.model;
+  }
+}
+async function roleSaveKey(key){
+  const pid=$("#rcp-"+key).value,p=provById(pid),v=$("#rckin-"+key).value.trim();
+  if(!v){alert_("warn","PROVIDER","请先粘贴 key");return}
+  const r=await fetch("/api/provider-key",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({key_env:p.key_env,api_key:v})});
+  if(!r.ok){alert_("err","PROVIDER","保存失败");return}
+  alert_("info","PROVIDER",`${p.name} key 已保存,即时生效`);
+  providers=await (await fetch("/api/providers")).json();
+  renderCrewSetup();loadProviders&&loadProviders();renderNoKeyBar();
 }
 
 /* ════════ 加载时回填历史(修"开页假死") ════════ */

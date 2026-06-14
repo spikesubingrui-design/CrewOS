@@ -140,6 +140,16 @@ class Ledger:
             out.append({"day": day, "cost": round(buckets.get(day, 0.0), 6)})
         return out
 
+    def agent_usage(self) -> dict:
+        """每个 agent 的用量:任务数(产出过结果的不同任务)/ 累计成本 / token 总量。
+        供 ORBIT 按用量缩放节点大小。"""
+        rows = self._conn.execute(
+            "SELECT from_agent a, COUNT(DISTINCT task_id) tasks, "
+            "SUM(cost_usd) cost, SUM(tokens_in+tokens_out) toks "
+            "FROM events WHERE type='task_result' GROUP BY from_agent").fetchall()
+        return {r["a"]: {"tasks": r["tasks"], "cost": round(r["cost"] or 0, 6),
+                         "tokens": int(r["toks"] or 0)} for r in rows}
+
     def eval_report(self) -> dict:
         """评估集自动生长:每个任务就是一条评估样本,从台账聚合模型胜任度。
         每 agent×模型:任务数 / 一次过率 / 平均轮次 / 上报数 / 总成本。

@@ -307,6 +307,12 @@ def api_cost():
     return rep
 
 
+@app.get("/api/crew-usage")
+def api_crew_usage():
+    """每个 agent 的任务数/成本/token,供 ORBIT 按用量缩放节点。"""
+    return _ledger().agent_usage()
+
+
 @app.get("/api/cost/dashboard")
 def api_cost_dashboard(days: int = 14):
     """成本仪表盘:今日/本月/总计 + 按模型 + 按 agent + 近 N 天逐日。"""

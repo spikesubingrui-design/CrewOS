@@ -675,7 +675,8 @@ async function init(){
         <div><div class="$$" id="mcost-${a.name}">$0.0000</div><div class="st" id="mst-${a.name}">STANDBY</div></div>
       </div>`);
     field.insertAdjacentHTML("beforeend",`
-      <div class="node" id="node-${a.name}" title="${a.model} · fallback ${a.fallback_model||'—'}">
+      <div class="node" id="node-${a.name}" title="${a.model} · fallback ${a.fallback_model||'—'}"
+           onclick="focusCrew('${a.name}')">
         <div class="core"></div><div class="cs">${cs}</div>
         <div class="md">${a.model}</div><div class="tk" id="ntk-${a.name}"></div>
       </div>`);
@@ -696,18 +697,32 @@ async function init(){
   maybeWelcome();
 }
 
-/* ════════ 名册 ↔ 轨道 联动高亮 ════════ */
+/* ════════ 名册 ↔ 轨道 双向联动高亮 ════════ */
 let _focused=null;
+function applyFocus(){   // 幂等地把当前 _focused 渲染到两侧(节点重建后也能恢复)
+  $$(".node.focus,.crew-row.focus").forEach(n=>n.classList.remove("focus"));
+  if(_focused){$("#node-"+_focused)?.classList.add("focus");$("#crew-"+_focused)?.classList.add("focus");}
+}
 function focusCrew(name){
-  // 确保在 ORBIT 视图
+  // 名册只在 ORBIT 视图可见;从名册点时若不在该视图则切过去(点节点时本就在,无副作用)
   if(!$("#view-orbit").classList.contains("active"))
     document.querySelector('.tab[data-v="orbit"]').click();
-  const on=_focused!==name;
-  $$(".node.focus").forEach(n=>n.classList.remove("focus"));
-  $$(".crew-row.focus").forEach(n=>n.classList.remove("focus"));
-  _focused=on?name:null;
-  if(on){$("#node-"+name)?.classList.add("focus");$("#crew-"+name)?.classList.add("focus");}
+  _focused=(_focused===name)?null:name;   // 再点同一个 = 取消
+  applyFocus();
 }
+function clearFocus(){_focused=null;applyFocus();}
+// 点轨道空白处取消高亮(点节点不触发)
+document.addEventListener("click",e=>{
+  const f=$("#orbitfield");
+  if(f&&f.contains(e.target)&&!e.target.closest(".node")&&!e.target.closest("#cmd-node"))clearFocus();
+});
+// ESC:先关弹层,否则清高亮
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Escape")return;
+  if($("#welcome")?.classList.contains("open"))return closeWelcome();
+  if($("#modal")?.classList.contains("open"))return $("#modal").classList.remove("open");
+  if(_focused)clearFocus();
+});
 
 /* ════════ 欢迎 / 分步引导 ════════ */
 const CREW_BLURB={researcher:"深度研究 / 长文档 / 竞品",writer:"中文文案 / 小红书 / 脚本",

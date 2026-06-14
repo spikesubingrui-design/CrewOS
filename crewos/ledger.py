@@ -124,6 +124,22 @@ class Ledger:
         ).fetchone()["c"]
         return {"total_usd": round(total, 6), "by_agent": by_agent, "by_model": by_model}
 
+    def cost_by_day(self, days: int = 14) -> list[dict]:
+        """近 N 天逐日成本(本地时区,补齐零值天,正序)。"""
+        import time as _t
+        rows = self._conn.execute(
+            "SELECT ts, cost_usd FROM events WHERE cost_usd>0").fetchall()
+        buckets: dict[str, float] = {}
+        for r in rows:
+            day = _t.strftime("%m-%d", _t.localtime(r["ts"]))
+            buckets[day] = buckets.get(day, 0.0) + r["cost_usd"]
+        now = _t.time()
+        out = []
+        for i in range(days - 1, -1, -1):
+            day = _t.strftime("%m-%d", _t.localtime(now - i * 86400))
+            out.append({"day": day, "cost": round(buckets.get(day, 0.0), 6)})
+        return out
+
     def eval_report(self) -> dict:
         """评估集自动生长:每个任务就是一条评估样本,从台账聚合模型胜任度。
         每 agent×模型:任务数 / 一次过率 / 平均轮次 / 上报数 / 总成本。

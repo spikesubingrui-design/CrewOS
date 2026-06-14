@@ -269,8 +269,36 @@ input[type=password]:focus{border-color:var(--blue)}
 #w-skip:hover{color:var(--text)}
 #welcome .btn{padding:11px 26px}
 
+/* ───── 零 key 提示条 ───── */
+#nokey-bar{display:none;position:relative;z-index:9;cursor:pointer;text-align:center;
+  font-size:11.5px;letter-spacing:.04em;padding:9px 16px;color:#0a0f1c;
+  background:linear-gradient(90deg,var(--amber),#ffd08a);font-weight:600}
+#nokey-bar.show{display:block;animation:adrop .3s}
+#nokey-bar b{font-weight:700}
+
+/* ───── COST 仪表盘 ───── */
+#cost-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:16px 18px}
+.kpi .micro{display:block;margin-bottom:8px}
+.kpi b{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text)}
+.kpi-sub{display:block;height:3px;margin-top:10px;background:rgba(255,180,84,.15);border-radius:2px;overflow:hidden}
+.kpi-sub i{display:block;height:100%;background:var(--amber)}
+#cost-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:16px}
+#cost-spark{display:flex;align-items:flex-end;gap:5px;height:170px;padding-top:10px}
+.bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+.bar i{width:100%;background:linear-gradient(180deg,var(--blue),rgba(79,124,255,.25));border-radius:2px 2px 0 0;
+  min-height:2px;transition:.3s}
+.bar:hover i{background:var(--ice)}
+.bar span{font-size:8px;color:var(--dim);white-space:nowrap}
+.costrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}
+.costrow:last-child{border-bottom:none}
+.costrow .cn{flex:1;color:var(--text)}.costrow .cv{color:var(--amber);font-variant-numeric:tabular-nums}
+.costrow .cbar{height:4px;border-radius:2px;background:var(--blue);min-width:2px}
+.cost-empty{color:var(--dim);font-size:11px;padding:14px 0}
+
 @media(max-width:1180px){#orbit-grid{grid-template-columns:1fr;height:auto}
-#orbitfield{height:480px}#board{grid-template-columns:repeat(2,1fr)}#config-grid{grid-template-columns:1fr}}
+#orbitfield{height:480px}#board{grid-template-columns:repeat(2,1fr)}#config-grid{grid-template-columns:1fr}
+#cost-kpis{grid-template-columns:repeat(2,1fr)}#cost-grid{grid-template-columns:1fr}}
 @media(max-width:760px){#wbody{padding:28px 24px 20px}#wfoot{padding:16px 24px 24px}#w-title{font-size:24px}}
 </style>
 </head>
@@ -282,6 +310,7 @@ input[type=password]:focus{border-color:var(--blue)}
   <nav>
     <div class="tab active" data-v="orbit">ORBIT</div>
     <div class="tab" data-v="board">MISSIONS</div>
+    <div class="tab" data-v="cost">COST</div>
     <div class="tab" data-v="config">CONFIG</div>
   </nav>
   <div class="grow"></div>
@@ -289,6 +318,10 @@ input[type=password]:focus{border-color:var(--blue)}
   <div class="clockbox"><span class="micro">MET</span><b id="met">T+00:00:00</b></div>
   <div class="clockbox" id="fuelbox"><span class="micro">FUEL USED</span><b id="fuel">$0.0000</b></div>
   <button id="guide-btn" onclick="openWelcome()" title="新手引导">? GUIDE</button>
+</div>
+
+<div id="nokey-bar" onclick="goConfigProviders()">
+  ⚠ 还没配置供应商 —— 乘组无法真实派单。点这里去 <b>CONFIG → 供应商</b> 粘一个 API key 即可起飞 ▸
 </div>
 
 <!-- ORBIT -->
@@ -332,6 +365,24 @@ input[type=password]:focus{border-color:var(--blue)}
     <div class="panel mcol" data-s="review"><div class="panel-h"><span class="micro">◍ Review</span></div><div class="body"></div></div>
     <div class="panel mcol" data-s="blocked"><div class="panel-h"><span class="micro">◍ Hold / Abort</span></div><div class="body"></div></div>
     <div class="panel mcol" data-s="done"><div class="panel-h"><span class="micro">◍ Landed</span></div><div class="body"></div></div>
+  </div>
+</div>
+
+<!-- COST -->
+<div class="view" id="view-cost">
+  <div id="cost-kpis">
+    <div class="kpi"><span class="micro">今日 TODAY</span><b id="k-today">$0.0000</b></div>
+    <div class="kpi"><span class="micro">本月 THIS MONTH</span><b id="k-month">$0.0000</b><span class="kpi-sub" id="k-month-bar"></span></div>
+    <div class="kpi"><span class="micro">总计 ALL TIME</span><b id="k-total">$0.0000</b></div>
+    <div class="kpi"><span class="micro">对比纯 Opus 估算节省</span><b id="k-saved" style="color:var(--green)">—</b></div>
+  </div>
+  <div id="cost-grid">
+    <div class="panel"><div class="panel-h"><span class="micro">近 14 天 / Daily Burn</span></div>
+      <div class="cfg-body"><div id="cost-spark"></div></div></div>
+    <div class="panel"><div class="panel-h"><span class="micro">按模型 / By Model</span></div>
+      <div class="cfg-body" id="cost-by-model"></div></div>
+    <div class="panel"><div class="panel-h"><span class="micro">按乘组 / By Crew</span></div>
+      <div class="cfg-body" id="cost-by-agent"></div></div>
   </div>
 </div>
 
@@ -509,7 +560,12 @@ $$(".tab").forEach(t=>t.onclick=()=>{
   $("#view-"+t.dataset.v).classList.add("active");
   if(t.dataset.v==="board")loadMissions();
   if(t.dataset.v==="orbit")layoutOrbit();
+  if(t.dataset.v==="cost")loadCostDashboard();
 });
+function goConfigProviders(){
+  document.querySelector('.tab[data-v="config"]').click();
+  setTimeout(()=>$("#providers")?.scrollIntoView({behavior:"smooth",block:"center"}),150);
+}
 
 /* ════════ 初始化 ════════ */
 async function init(){
@@ -546,7 +602,7 @@ async function init(){
   providers=await (await fetch("/api/providers")).json();
   recs=await (await fetch("/api/recommendations")).json();
   layoutOrbit();orbitTick();loadProviders();llmInit();loadCost();loadSettings();loadFile();connectWS();
-  loadApprovals();loadEvals();
+  loadApprovals();loadEvals();renderNoKeyBar();await backfill();
   setInterval(loadCost,15000);setInterval(loadApprovals,20000);setInterval(loadEvals,60000);
   tele({ts:Date.now()/1000,from_agent:"sys",to_agent:"",type:"status_update",payload:"{}",cost_usd:0},
        "MISSION CONTROL ONLINE · "+agents.length+" CREW ON ORBIT");
@@ -1015,7 +1071,7 @@ async function saveProviderKey(pid,keyEnv){
   if(!r.ok){alert_("err","PROVIDER","保存失败");return}
   alert_("info","PROVIDER",provName(pid)+" key 已保存,即时生效");
   providers=await (await fetch("/api/providers")).json();
-  loadProviders();llmLoad();   // 刷新推荐横幅里的就绪状态
+  loadProviders();llmLoad();renderNoKeyBar();   // 刷新推荐横幅与零key提示条
 }
 async function addCustomProvider(){
   const name=$("#cp-name").value.trim(),endpoint=$("#cp-endpoint").value.trim(),api_key=$("#cp-key").value.trim();
@@ -1026,7 +1082,61 @@ async function addCustomProvider(){
   $("#cp-name").value="";$("#cp-endpoint").value="";$("#cp-key").value="";
   alert_("info","PROVIDER","自定义供应商已添加");
   providers=await (await fetch("/api/providers")).json();
-  loadProviders();llmLoad();
+  loadProviders();llmLoad();renderNoKeyBar();
+}
+
+/* ════════ 加载时回填历史(修"开页假死") ════════ */
+async function backfill(){
+  try{
+    const evs=await (await fetch("/api/recent?limit=60")).json();
+    for(const ev of evs){
+      const p=JSON.parse(ev.payload||"{}"),brief=p.summary||p.title||p.reason||"";
+      tele(ev,brief);                                  // 回放进遥测流
+      if(ev.type==="task_assign")setCrew(ev.to_agent,"engaged",brief);
+      if(ev.type==="task_result"||ev.type==="task_done")setCrew(ev.from_agent,null,"");
+    }
+    if(evs.length)tele({ts:Date.now()/1000,from_agent:"sys",to_agent:"",type:"status_update",
+      payload:"{}",cost_usd:0},`回放最近 ${evs.length} 条事件 · 实时接管`);
+  }catch(e){}
+}
+
+/* ════════ 零 key 提示条 ════════ */
+function renderNoKeyBar(){
+  const none=!(providers||[]).some(p=>p.key_set);
+  $("#nokey-bar").classList.toggle("show",none);
+}
+
+/* ════════ 成本仪表盘 ════════ */
+async function loadCostDashboard(){
+  const c=await (await fetch("/api/cost/dashboard?days=14")).json();
+  const f=v=>"$"+(v||0).toFixed(4);
+  $("#k-today").textContent=f(c.today_usd);
+  $("#k-month").textContent=f(c.month_usd);
+  $("#k-total").textContent=f(c.total_usd);
+  // 月度警戒进度条
+  const warn=c.monthly_warn_usd||0,bar=$("#k-month-bar");
+  if(warn>0){const pct=Math.min(100,c.month_usd/warn*100);
+    bar.innerHTML=`<i style="width:${pct}%;background:${pct>=100?'var(--red)':pct>=80?'var(--amber)':'var(--green)'}"></i>`;
+    bar.title=`本月警戒线 $${warn}`;}else bar.innerHTML="";
+  // 节省估算:CrewOS 实花 vs 全用 Opus(粗估 in$15/out$75,按 ~12x 便宜均值反推)
+  const saved=c.total_usd>0?Math.round((1-1/12)*100):0;
+  $("#k-saved").textContent=c.total_usd>0?`~${saved}%`:"—";
+  // 逐日柱
+  const days=c.by_day||[],max=Math.max(...days.map(d=>d.cost),1e-9);
+  $("#cost-spark").innerHTML=days.map(d=>
+    `<div class="bar" title="${d.day}: $${d.cost.toFixed(4)}">
+       <i style="height:${Math.max(2,d.cost/max*150)}px"></i><span>${d.day.slice(3)}</span></div>`).join("");
+  // 按模型 / 按 agent
+  const rows=(obj,nameFn)=>{
+    const ents=Object.entries(obj||{}).filter(([k,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+    if(!ents.length)return '<div class="cost-empty">暂无成本数据 — 配 key 派单后这里就有了</div>';
+    const mx=Math.max(...ents.map(e=>e[1]));
+    return ents.map(([k,v])=>`<div class="costrow"><span class="cn">${esc(nameFn(k))}</span>
+      <span class="cbar" style="width:${Math.max(8,v/mx*70)}px"></span>
+      <span class="cv">$${v.toFixed(4)}</span></div>`).join("");
+  };
+  $("#cost-by-model").innerHTML=rows(c.by_model,k=>k||"(未知)");
+  $("#cost-by-agent").innerHTML=rows(c.by_agent,k=>CALLSIGN[k]||k);
 }
 init();
 </script>

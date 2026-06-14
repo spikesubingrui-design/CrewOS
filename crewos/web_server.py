@@ -250,9 +250,19 @@ def api_heartbeat(agent: str):
     return _router().heartbeat(agent, max_age=60)
 
 
+@app.get("/api/recent")
+def api_recent(limit: int = 60):
+    """最近 N 条事件(正序),供看板加载时回填遥测流——开页不再像假死。"""
+    led = _ledger()
+    rows = led._conn.execute(
+        "SELECT * FROM events ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
 @app.get("/api/tasks")
 def api_tasks(limit: int = 50):
     led = _ledger()
+    # 排除 system 伪任务(心跳/换脑/记忆等元事件挂它名下,不是真任务)
     rows = led._conn.execute("""
         SELECT task_id,
                MIN(ts) created,
@@ -262,7 +272,8 @@ def api_tasks(limit: int = 50):
                (SELECT json_extract(payload,'$.title') FROM events e2
                  WHERE e2.task_id=e.task_id AND e2.type='task_created') title,
                (SELECT GROUP_CONCAT(type) FROM events e3 WHERE e3.task_id=e.task_id) types
-        FROM events e GROUP BY task_id ORDER BY updated DESC LIMIT ?""", (limit,)
+        FROM events e WHERE task_id != 'system'
+        GROUP BY task_id ORDER BY updated DESC LIMIT ?""", (limit,)
     ).fetchall()
     out = []
     for r in rows:
@@ -294,6 +305,24 @@ def api_cost():
     rep = _ledger().cost_report()
     rep["monthly_warn_usd"] = _settings()["monthly_warn_usd"]
     return rep
+
+
+@app.get("/api/cost/dashboard")
+def api_cost_dashboard(days: int = 14):
+    """成本仪表盘:今日/本月/总计 + 按模型 + 按 agent + 近 N 天逐日。"""
+    led = _ledger()
+    t = time.localtime()
+    day_start = time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1))
+    month_start = time.mktime((t.tm_year, t.tm_mon, 1, 0, 0, 0, 0, 0, -1))
+    full = led.cost_report()
+    today = led.cost_report(since_ts=day_start)["total_usd"]
+    month = led.cost_report(since_ts=month_start)["total_usd"]
+    by_day = led.cost_by_day(days)
+    s = _settings()
+    return {"today_usd": today, "month_usd": month, "total_usd": full["total_usd"],
+            "by_agent": full["by_agent"], "by_model": full["by_model"],
+            "by_day": by_day, "monthly_warn_usd": s["monthly_warn_usd"],
+            "monthly_hard_usd": float(s.get("monthly_hard_usd") or 0)}
 
 
 class DispatchReq(BaseModel):

@@ -19,12 +19,15 @@ import re
 
 from .router import Channel, _call_openai_compatible
 
-PLAN_SYSTEM = """你是 CrewOS 的总指挥(CEO)。你只决策,不亲自执行。
-给定用户目标和你的团队名册,把目标拆解成给具体成员的派单。
-只输出 JSON 数组,每项 {"agent": "成员名", "instruction": "明确的指令(含目标+验收要求)"}。
-规则:中文创作给 writer,代码给 coder,研究/搜资料给 researcher,数据/计算给 analyst,
-行政/合同/邮件给 builder,批量/转换给 runner,视频/图像理解给 perceiver。
-简单目标用 1 个派单,复合目标可拆 2-4 个。不要输出 JSON 以外的任何内容。"""
+PLAN_SYSTEM = """你是 CrewOS 的总指挥(CEO)。你只决策,不亲自执行专业活,但你很聪明。
+先判断这个目标值不值得动用团队:
+- 如果是寒暄、常识问答、简单算术、一句话就能回答的,**你直接答**,别浪费 token 调用专业成员——
+  输出 JSON 对象 {"direct": "你的回答"}。
+- 如果确实需要专业能力(写作/编码/研究/数据/行政/批量/视频理解),才拆解派单——
+  输出 JSON 数组,每项 {"agent": "成员名", "instruction": "明确指令(含目标+验收要求)"}。
+派单规则:中文创作→writer,代码→coder,研究/搜资料→researcher,数据/计算→analyst,
+行政/合同/邮件→builder,批量/转换→runner,视频/图像理解→perceiver。
+简单专业目标 1 个派单,复合目标 2-4 个。只输出 JSON,不要任何额外文字。"""
 
 REVIEW_SYSTEM = """你是 CrewOS 总指挥。下面是你派出的各成员的产出。
 用 2-4 句中文总结交付结果、是否达成目标、还差什么。简洁,直接说结论。"""
@@ -37,6 +40,23 @@ def _roster_desc(router) -> str:
         rec = RECOMMENDATIONS.get(name, {})
         lines.append(f"- {name}: {rec.get('reason', '')[:40]}")
     return "\n".join(lines)
+
+
+def parse_direct(text: str) -> str | None:
+    """CEO 判断任务简单到自己能答时返回 {"direct": "..."};解析出答案则返回它。"""
+    body = text.strip()
+    m = re.search(r"```(?:json)?\s*(.+?)```", body, re.DOTALL)
+    if m:
+        body = m.group(1).strip()
+    m = re.search(r"\{.*\}", body, re.DOTALL)
+    if not m:
+        return None
+    try:
+        obj = json.loads(m.group(0))
+    except (ValueError, TypeError):
+        return None
+    d = obj.get("direct") if isinstance(obj, dict) else None
+    return str(d).strip() if d else None
 
 
 def parse_plan(text: str, valid_agents: list[str]) -> list[dict]:
@@ -81,6 +101,13 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
             [{"role": "system", "content": PLAN_SYSTEM},
              {"role": "user", "content": f"目标:{goal}\n\n团队名册:\n{_roster_desc(router)}"}],
             temperature, 1500)
+        # 简单任务:CEO 直接答,不动用任何 agent
+        direct = parse_direct(plan_resp["content"])
+        if direct:
+            led.log(task_id, "task_done", "ceo", "user", payload={
+                "summary": direct, "direct": True})
+            return {"task_id": task_id, "plan": [], "summary": direct,
+                    "direct": True, "degraded": False}
         plan = parse_plan(plan_resp["content"], roster)
     except Exception as e:
         led.log(task_id, "escalation", "ceo", "user", payload={

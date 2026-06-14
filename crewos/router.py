@@ -123,6 +123,20 @@ def _http_error_detail(e: "urllib.error.HTTPError") -> str:
     return f"HTTP {e.code}{hint} {str(body)[:160]}".strip()
 
 
+def list_models(endpoint: str, key: str, timeout: int = 10) -> list[str]:
+    """拉取一个 OpenAI 兼容供应商的可用模型列表(GET /models)。失败返回 []。"""
+    if endpoint.startswith("mock://"):
+        return []
+    req = urllib.request.Request(
+        endpoint.rstrip("/") + "/models",
+        headers={"Authorization": f"Bearer {key}"} if key else {})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read())
+    items = data.get("data") if isinstance(data, dict) else data
+    ids = [m.get("id") for m in (items or []) if isinstance(m, dict) and m.get("id")]
+    return sorted(set(ids))
+
+
 def _media_part(url: str) -> dict:
     """媒体 URL → OpenAI 兼容 content part(火山方舟 doubao 视频理解同此格式)。"""
     ext = url.split("?")[0].rsplit(".", 1)[-1].lower()

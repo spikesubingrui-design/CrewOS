@@ -214,6 +214,8 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
 .rc-morelink:hover{color:var(--ice)}
 .rc-more{display:none;grid-template-columns:2fr 1fr;gap:10px;margin-top:8px}
 .rc-more.show{display:grid}
+.rc-del{color:var(--dim);cursor:pointer;font-size:12px;padding:0 4px}
+.rc-del:hover{color:var(--red)}
 @media(max-width:680px){.rc-grid{grid-template-columns:1fr 1fr}}
 
 /* 供应商面板 */
@@ -444,7 +446,10 @@ input[type=password]:focus{border-color:var(--blue)}
   <!-- HERO:角色优先的 LLM 配置(CEO + 每个 agent 一张卡,内联配 key) -->
   <div class="panel" id="setup-panel">
     <div class="panel-h"><span class="micro" data-i18n="setup_title">乘组 LLM 配置 · 给谁配一目了然</span>
-      <span class="micro" style="color:var(--dim)" id="setup-count">—</span></div>
+      <span style="display:flex;gap:12px;align-items:center;margin-left:auto">
+        <span class="micro" style="color:var(--dim)" id="setup-count">—</span>
+        <button class="btn" style="padding:6px 12px;font-size:9.5px" onclick="addAgent()" data-i18n="add_agent">+ 新增成员</button>
+      </span></div>
     <div class="cfg-body" id="crew-setup"></div>
   </div>
 
@@ -684,6 +689,7 @@ const I18N={
   size_cost:{zh:"按成本",en:"By cost"},size_tokens:{zh:"按 token",en:"By tokens"},
   more_opts:{zh:"⋯ 更多(备用模型 / 温度)",en:"⋯ More (fallback / temperature)"},
   fb_model:{zh:"备用模型(交接,需授权才启用)",en:"Fallback model (handoff, needs approval)"},
+  add_agent:{zh:"+ 新增成员",en:"+ Add member"},
 };
 function t(k){return (I18N[k]||{})[LANG]||(I18N[k]||{}).en||k}
 function applyI18n(){
@@ -1406,9 +1412,11 @@ function roleCard(key,name,role,model,provId,withRec,fb,temp){
         <input type="number" id="rct-${key}" value="${temp!=null?temp:0.7}" step="0.1" min="0" max="2"></div>
     </div>`:"";
   return `<div class="role-card ${key==='__ceo__'?'ceo':''}" id="rc-${key}">
-    <div class="rc-top"><span class="rc-name">${esc(name)}</span><span class="rc-role">${esc(role)}</span>${chip}</div>
+    <div class="rc-top"><span class="rc-name">${esc(name)}</span><span class="rc-role">${esc(role)}</span>${chip}
+      ${withRec?`<span class="rc-del" title="删除成员" onclick="delAgent('${key}')">✕</span>`:""}</div>
     <div class="rc-grid">
-      <input type="text" id="rcm-${key}" value="${esc(model||"")}" placeholder="模型 ID">
+      <span><input type="text" id="rcm-${key}" value="${esc(model||"")}" list="rcdl-${key}"
+        placeholder="模型(配好 key 后可下拉选)" style="width:100%"><datalist id="rcdl-${key}"></datalist></span>
       <select id="rcp-${key}" onchange="roleKeyRow('${key}')">${provOptions(provId)}</select>
       ${withRec?`<button class="btn" onclick="roleUseRec('${key}')">用推荐</button>`:`<span></span>`}
       <button class="btn solid" onclick="roleSave('${key}')">保存</button>
@@ -1423,6 +1431,23 @@ function roleCard(key,name,role,model,provId,withRec,fb,temp){
 }
 function rcMore(key){const m=$("#rcmore-"+key);m.classList.toggle("show");
   $("#rcml-"+key).textContent=m.classList.contains("show")?"⋯ 收起":t("more_opts");}
+async function addAgent(){
+  const name=(prompt("新成员名称(小写字母/数字/下划线,如 designer):")||"").trim().toLowerCase();
+  if(!name)return;
+  const role=(prompt("一句话职责(可留空,如 海报设计/SEO):")||"").trim();
+  const r=await fetch("/api/agent",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name,role})});
+  if(!r.ok){const e=await r.json();alert_("err","AGENT",e.detail||e.error||"新增失败");return}
+  alert_("info","AGENT",`已新增 ${name},正在刷新…`);
+  setTimeout(()=>location.reload(),600);   // 重建轨道/名册
+}
+async function delAgent(key){
+  if(!confirm(`删除成员 ${CALLSIGN[key]||key}?其档案/记忆/错题本一并删除,不可恢复。`))return;
+  const r=await fetch("/api/agent/"+key,{method:"DELETE"});
+  if(!r.ok){const e=await r.json();alert_("err","AGENT",e.detail||e.error||"删除失败");return}
+  alert_("warn","AGENT",`已删除 ${key},正在刷新…`);
+  setTimeout(()=>location.reload(),600);
+}
 async function renderCrewSetup(){
   const box=$("#crew-setup");if(!box)return;
   _ceoCfg=await (await fetch("/api/settings")).json();
@@ -1447,6 +1472,18 @@ function roleKeyRow(key){   // 根据当前选中的供应商,刷新该卡的 ke
   $("#rckin-"+key).placeholder=p.key_set?`${p.key_env} 已配 — 输入可覆盖`:`为 ${p.name} 粘 API key`;
   krow.classList.toggle("show",!p.key_set);   // 缺 key 时自动展开输入行
   $("#rckn-"+key).textContent=p.key_set?"":`这个 key 写入 ${p.key_env},所有用 ${p.name} 的成员共享`;
+  fillModels(pid,"rcdl-"+key);   // 拉该供应商模型填进 datalist,少手输
+}
+const _modelCache={};
+async function fillModels(pid,datalistId){
+  const dl=$("#"+datalistId);if(!dl)return;
+  let models=_modelCache[pid];
+  if(!models){
+    try{const r=await (await fetch("/api/provider-models/"+pid)).json();models=r.models||[];}
+    catch(e){models=[];}
+    _modelCache[pid]=models;
+  }
+  dl.innerHTML=models.map(m=>`<option value="${esc(m)}">`).join("");
 }
 function roleUseRec(key){
   const rec=recs[key];if(!rec)return;

@@ -493,6 +493,32 @@ def api_providers():
     return out
 
 
+_models_cache: dict = {}
+
+
+@app.get("/api/provider-models/{pid}")
+def api_provider_models(pid: str):
+    """列出供应商的可用模型(GET /models),供前端下拉选择,少手输。缓存 5 分钟。"""
+    from . import providers as provcat
+    from .router import list_models
+    prov = provcat.get_provider(ROOT, pid)
+    if not prov:
+        return JSONResponse({"error": "unknown_provider"}, status_code=404)
+    key = os.environ.get(prov["key_env"], "")
+    local = prov["endpoint"].startswith(("http://localhost", "http://127."))
+    if not key and not local:
+        return {"models": [], "note": "需先配 key 才能拉取模型列表"}
+    cached = _models_cache.get(pid)
+    if cached and time.time() - cached[0] < 300:
+        return {"models": cached[1]}
+    try:
+        models = list_models(prov["endpoint"], key)
+        _models_cache[pid] = (time.time(), models)
+        return {"models": models}
+    except Exception as e:
+        return {"models": [], "error": str(e)[:160]}
+
+
 @app.get("/api/recommendations")
 def api_recommendations():
     """每个 agent 的推荐模型 + 理由 + 可用供应商。"""
@@ -611,6 +637,59 @@ def api_put_agent(name: str, cfg: AgentCfg):
     _ledger().log("system", "status_update", "user", name, payload={
         "summary": f"LLM 绑定变更 → {cfg.model}(档案/记忆全部留任)"})
     return {"ok": True, "agent": name, "model": cfg.model}
+
+
+class NewAgentReq(BaseModel):
+    name: str
+    role: str = ""
+    model: str = ""
+    provider_id: str = ""
+
+
+@app.post("/api/agent")
+def api_new_agent(req: NewAgentReq):
+    """新增乘组成员:建 role.md / provider.yaml / actions.yaml / memory。"""
+    from . import providers as provcat
+    name = req.name.strip().lower()
+    if not re.fullmatch(r"[a-z][a-z0-9_]{1,23}", name):
+        return JSONResponse({"error": "bad_name",
+            "detail": "名称用小写字母/数字/下划线,2-24 字符,字母开头"}, status_code=422)
+    if name in ("system", "ceo", "user", "router", "cron", "watchdog"):
+        return JSONResponse({"error": "reserved_name", "detail": f"{name} 是保留名"}, status_code=422)
+    adir = ROOT / "agents" / name
+    if adir.exists():
+        return JSONResponse({"error": "exists", "detail": f"{name} 已存在"}, status_code=409)
+    (adir / "memory").mkdir(parents=True)
+    (adir / "role.md").write_text(
+        f"# {name}\n\n你是 {req.role or name}。专注本职,产出明确、可验收。", encoding="utf-8")
+    (adir / "memory" / "lessons.md").write_text(
+        "# 错题本(失败 → 修正记录)\n\n(暂无记录)\n", encoding="utf-8")
+    (adir / "actions.yaml").write_text("actions:\n  do_work: {risk: 0}\n", encoding="utf-8")
+    prov = provcat.get_provider(ROOT, req.provider_id) if req.provider_id else None
+    if prov:
+        channels = [{"name": prov["id"], "endpoint": prov["endpoint"], "key_env": prov["key_env"]}]
+    else:
+        channels = [{"name": "mock", "endpoint": "mock://", "key_env": ""}]
+    (adir / "provider.yaml").write_text(yaml.safe_dump({
+        "model": req.model or "mock-model", "channels": channels,
+        "fallback_model": "", "pricing": {"input_per_m": 1.0, "output_per_m": 2.0},
+        "temperature": 0.7}, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    _ledger().log("system", "status_update", "user", name, payload={
+        "summary": f"新增乘组成员 {name}"})
+    return {"ok": True, "agent": name}
+
+
+@app.delete("/api/agent/{name}")
+def api_delete_agent(name: str):
+    """删除乘组成员(连同其档案/记忆/错题本)。"""
+    import shutil
+    adir = ROOT / "agents" / name
+    if not adir.is_dir() or not (adir / "provider.yaml").exists():
+        return JSONResponse({"error": "unknown_agent"}, status_code=404)
+    shutil.rmtree(adir)
+    _ledger().log("system", "status_update", "user", name, payload={
+        "summary": f"删除乘组成员 {name}"})
+    return {"ok": True, "deleted": name}
 
 
 class BindReq(BaseModel):

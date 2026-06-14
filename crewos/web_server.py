@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import hmac
 import os
 import re
 import sys
@@ -60,7 +61,9 @@ def _settings() -> dict:
 # ---------- 可选 token 认证(从局域网/隧道访问时必配) ----------
 
 def _authed(token: str, provided: str | None) -> bool:
-    return not token or provided == token
+    if not token:
+        return True
+    return hmac.compare_digest(str(provided or ""), token)   # 恒定时间比较,防计时侧信道
 
 
 @app.middleware("http")
@@ -412,7 +415,13 @@ def serve_deliverable(task_id: str, fname: str):
     # 防目录穿越:必须落在 deliverables/<task_id>/ 之内
     if base not in p.parents or not p.is_file():
         return JSONResponse({"error": "not_found"}, status_code=404)
-    return FileResponse(str(p))
+    # 模型产出的 HTML 与看板同源,直接渲染会被它的脚本读到看板 token/调用看板 API(存储型 XSS)。
+    # 用 CSP sandbox 把它丢进独立的不透明源:游戏照常跑(allow-scripts),但拿不到看板 cookie/DOM。
+    headers = {
+        "Content-Security-Policy": "sandbox allow-scripts allow-pointer-lock allow-modals allow-popups",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return FileResponse(str(p), headers=headers)
 
 
 class BudgetReq(BaseModel):
@@ -571,8 +580,13 @@ def api_provider_key(req: ProviderKeyReq):
     key 只活在环境变量,永不进 agent 上下文。"""
     from .workspace import write_env
     ke = req.key_env.strip()
-    if not ke:
-        return JSONResponse({"error": "bad_key_env"}, status_code=422)
+    # 只接受规范的环境变量名,且不得覆盖系统/运行时关键变量(防止经此端点改 PATH 等)
+    _DANGER = {"PATH", "HOME", "SHELL", "PYTHONPATH", "LD_PRELOAD", "LD_LIBRARY_PATH",
+               "PYTHONHOME", "IFS", "BASH_ENV"}
+    if (not re.fullmatch(r"[A-Z][A-Z0-9_]*", ke) or ke in _DANGER
+            or ke.startswith(("LD_", "DYLD_"))):
+        return JSONResponse({"error": "bad_key_env",
+                             "detail": "key_env 须为大写字母/数字/下划线,且不能是系统变量"}, status_code=422)
     write_env(ROOT, {ke: req.api_key.strip()})
     if req.api_key.strip():
         os.environ[ke] = req.api_key.strip()   # 即时生效,本次会话立刻可派单
@@ -618,8 +632,9 @@ def api_put_settings(body: dict):
                          "monthly_hard_usd", "watchdog_suspicious_minutes",
                          "watchdog_critical_minutes", "ceo_model", "ceo_provider",
                          "cny_rate",
-                         "u_memory_enabled", "u_hot_dir", "u_wiki_dir",
-                         "u_gbrain_bin", "u_gbrain_path")})
+                         "u_memory_enabled", "u_hot_dir", "u_wiki_dir")})
+    # 注意:u_gbrain_bin / u_gbrain_path(被执行的二进制)故意不在 API 可写白名单内 ——
+    # 只能改 settings.yaml(已等于有文件系统权限),避免经联网端点注入任意可执行文件。
     f.write_text(yaml.safe_dump(cur, allow_unicode=True), encoding="utf-8")
     return cur
 

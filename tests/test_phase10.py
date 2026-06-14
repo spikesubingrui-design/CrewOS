@@ -60,7 +60,7 @@ def test_recall_parses_gbrain_search(monkeypatch):
         monkeypatch.setattr(umemory.subprocess, "run",
                             lambda *a, **k: SimpleNamespace(returncode=0, stdout=fake_out, stderr=""))
         block = umemory.recall("开派 公司", _settings(tmp))
-        assert "U(主人第二大脑)" in block
+        assert "U_MEMORY" in block and "仅供背景参考" in block   # 注入防护边界
         assert "companies/kaipai" in block
         assert "noise line" not in block        # 只取打分行
 
@@ -139,3 +139,44 @@ def test_web_ledger_is_singleton_per_path(monkeypatch):
         ws._LEDGER_CACHE.clear()
         a = ws._ledger(); b = ws._ledger()
         assert a is b
+
+
+# ── v0.14.3:安全加固(夜间评审 Batch C) ──
+def test_deliverable_sandbox_and_traversal(monkeypatch):
+    from fastapi.testclient import TestClient
+    import crewos.web_server as ws
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        monkeypatch.setattr(ws, "ROOT", tmp)
+        ws._LEDGER_CACHE.clear()
+        dl = tmp / "deliverables" / "task_x"; dl.mkdir(parents=True)
+        (dl / "coder.html").write_text("<!DOCTYPE html><body>HI</body>", encoding="utf-8")
+        c = TestClient(ws.app)
+        r = c.get("/deliverables/task_x/coder.html")
+        assert r.status_code == 200 and "HI" in r.text
+        # CSP sandbox 头隔离模型 HTML,防其读看板 token
+        assert "sandbox" in r.headers.get("content-security-policy", "")
+        # 目录穿越被挡
+        assert c.get("/deliverables/task_x/..%2f..%2f.env").status_code in (400, 404)
+        assert c.get("/deliverables/zzz/none.html").status_code == 404
+
+
+def test_provider_key_rejects_dangerous_env(monkeypatch):
+    from fastapi.testclient import TestClient
+    import crewos.web_server as ws
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch.setattr(ws, "ROOT", Path(d))
+        ws._LEDGER_CACHE.clear()
+        c = TestClient(ws.app)
+        assert c.post("/api/provider-key", json={"key_env": "PATH", "api_key": "x"}).status_code == 422
+        assert c.post("/api/provider-key", json={"key_env": "LD_PRELOAD", "api_key": "x"}).status_code == 422
+        assert c.post("/api/provider-key", json={"key_env": "bad name", "api_key": "x"}).status_code == 422
+        assert c.post("/api/provider-key", json={"key_env": "DEEPSEEK_KEY", "api_key": "sk-x"}).status_code == 200
+
+
+def test_gbrain_bin_rejects_path_separators(monkeypatch):
+    from crewos import umemory
+    # 指向带路径分隔符的"二进制" → 直接拒绝,不执行
+    monkeypatch.setattr(umemory.subprocess, "run",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("不该执行带路径的 bin")))
+    assert umemory.recall("x", {"u_memory_enabled": True, "u_gbrain_bin": "/tmp/evil.sh"}) == ""

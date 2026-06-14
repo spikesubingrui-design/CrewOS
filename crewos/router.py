@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -120,7 +121,9 @@ def _http_error_detail(e: "urllib.error.HTTPError") -> str:
     hint = {401: "(key 无效或未配置)", 403: "(无权限/key 问题)",
             404: "(模型 ID 可能不对)", 400: "(请求被拒,常见是模型 ID 不对)",
             429: "(限流,稍后再试)"}.get(e.code, "")
-    return f"HTTP {e.code}{hint} {str(body)[:160]}".strip()
+    # 错误体可能把我们发去的 Authorization/key 原样回显,落台账前先抹掉 Bearer/sk- 串
+    safe = re.sub(r"(?i)(bearer\s+|authorization[:=]\s*|sk-)[A-Za-z0-9_\-]+", r"\1***", str(body))
+    return f"HTTP {e.code}{hint} {safe[:160]}".strip()
 
 
 def list_models(endpoint: str, key: str, timeout: int = 10) -> list[str]:
@@ -328,8 +331,9 @@ class Router:
                 "reason": f"{name} 处于暂停态(预算硬刹车/人工),拒绝派单", "agent": name})
             raise AgentPaused(f"{name} 已暂停,无法派单。请先 crewos resume {name} 或在看板恢复。")
 
-        # 入站 DLP:指令/上下文含敏感信息时拒发第三方模型,清理后才能重派
-        inbound = dlp_scan(instruction + "\n" + context,
+        # 入站 DLP:指令/上下文/媒体 URL 含敏感信息时拒发第三方模型,清理后才能重派
+        # (media_url 常带签名/token 查询参数,一并扫描)
+        inbound = dlp_scan(instruction + "\n" + context + ("\n" + media_url if media_url else ""),
                            extra_blocklist=self.dlp_blocklist)
         if inbound.blocked:
             self.ledger.log(task_id, "dlp_block", "router", "user", payload={

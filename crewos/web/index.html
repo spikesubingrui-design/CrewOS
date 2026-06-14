@@ -118,8 +118,10 @@ nav{display:flex;gap:4px;height:100%}
 /* 传输台 */
 #transmit{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:13px 18px}
 #transmit .micro{white-space:nowrap}
-select,input[type=text]{background:rgba(150,180,255,.04);border:1px solid var(--line);color:var(--text);
+select,input[type=text]{background:var(--panel-solid);border:1px solid var(--line);color:var(--text);
   font-family:var(--mono);font-size:12px;padding:10px 13px;border-radius:2px;outline:none}
+/* 原生下拉弹窗:显式深底浅字,修复白底浅字看不清 */
+select option{background:var(--panel-solid);color:var(--text)}
 select:focus,input:focus,textarea:focus{border-color:var(--blue)}
 #tx-input{flex:1}
 .btn{font-family:var(--mono);font-size:10px;letter-spacing:.2em;padding:11px 22px;cursor:pointer;
@@ -209,8 +211,50 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
 .apbtns .btn.deny{color:var(--red);border-color:var(--red)}
 .apbtns .btn.deny:hover{background:var(--red);color:#fff;box-shadow:0 0 18px rgba(255,92,92,.4)}
 
+/* ───── 顶栏 GUIDE 按钮 ───── */
+#guide-btn{font-family:var(--mono);font-size:10px;letter-spacing:.2em;padding:9px 16px;cursor:pointer;
+  background:transparent;color:var(--ice);border:1px solid var(--line-strong);border-radius:2px;
+  font-weight:600;transition:.2s;white-space:nowrap}
+#guide-btn:hover{border-color:var(--ice);box-shadow:0 0 16px rgba(157,184,255,.3)}
+
+/* ───── 欢迎 / 分步引导覆盖层 ───── */
+#welcome{display:none;position:fixed;inset:0;z-index:300;background:rgba(2,4,9,.92);
+  backdrop-filter:blur(8px);align-items:center;justify-content:center;padding:24px}
+#welcome.open{display:flex;animation:tin .4s}
+#wbox{position:relative;width:100%;max-width:720px;background:var(--panel-solid);
+  border:1px solid var(--line-strong);border-radius:5px;box-shadow:0 24px 80px rgba(0,0,0,.7);
+  overflow:hidden}
+#wtop{height:3px;background:linear-gradient(90deg,var(--blue),var(--ice))}
+#wbody{padding:38px 44px 30px}
+#w-eyebrow{font-size:10px;letter-spacing:.3em;color:var(--ice);text-transform:uppercase;margin-bottom:14px}
+#w-title{font-family:var(--disp);font-weight:700;font-size:30px;letter-spacing:.04em;line-height:1.2;margin-bottom:16px}
+#w-title .accent{background:linear-gradient(180deg,#fff,#9db8ff);-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+#w-content{font-size:13.5px;line-height:1.95;color:#c4cfe8;min-height:188px}
+#w-content p{margin-bottom:12px}
+#w-content b{color:var(--text);font-weight:600}
+#w-content code{background:rgba(150,180,255,.1);padding:2px 7px;border-radius:3px;
+  font-size:12px;color:var(--ice)}
+#w-content .wrow{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line)}
+#w-content .wrow:last-child{border-bottom:none}
+#w-content .wk{color:var(--ice);font-weight:600;min-width:96px;font-size:12px}
+#w-content .wlvl{display:inline-block;width:42px;color:var(--amber);font-weight:600}
+#w-content .pill{display:inline-block;font-size:9px;letter-spacing:.12em;padding:3px 9px;border-radius:2px;
+  border:1px solid;margin-right:6px}
+#w-content .pill.ok{color:var(--green);border-color:rgba(46,229,157,.4)}
+#w-content .pill.no{color:var(--amber);border-color:rgba(255,180,84,.4)}
+#wfoot{display:flex;align-items:center;gap:16px;padding:20px 44px 30px}
+#wdots{display:flex;gap:8px;flex:1}
+#wdots i{width:7px;height:7px;border-radius:50%;background:rgba(150,180,255,.2);transition:.3s;cursor:pointer}
+#wdots i.on{background:var(--ice);box-shadow:0 0 8px var(--ice)}
+#w-skip{background:none;border:none;color:var(--dim);font-family:var(--mono);font-size:11px;
+  letter-spacing:.1em;cursor:pointer}
+#w-skip:hover{color:var(--text)}
+#welcome .btn{padding:11px 26px}
+
 @media(max-width:1180px){#orbit-grid{grid-template-columns:1fr;height:auto}
 #orbitfield{height:480px}#board{grid-template-columns:repeat(2,1fr)}#config-grid{grid-template-columns:1fr}}
+@media(max-width:760px){#wbody{padding:28px 24px 20px}#wfoot{padding:16px 24px 24px}#w-title{font-size:24px}}
 </style>
 </head>
 <body>
@@ -227,6 +271,7 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
   <div class="clockbox"><span class="micro">UTC</span><b id="utc">--:--:--</b></div>
   <div class="clockbox"><span class="micro">MET</span><b id="met">T+00:00:00</b></div>
   <div class="clockbox" id="fuelbox"><span class="micro">FUEL USED</span><b id="fuel">$0.0000</b></div>
+  <button id="guide-btn" onclick="openWelcome()" title="新手引导">? GUIDE</button>
 </div>
 
 <!-- ORBIT -->
@@ -360,6 +405,24 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
 <div id="alerts"></div>
 <div id="apdock"></div>
 
+<!-- 欢迎 / 分步引导 -->
+<div id="welcome" onclick="if(event.target===this)closeWelcome()">
+  <div id="wbox">
+    <div id="wtop"></div>
+    <div id="wbody">
+      <div id="w-eyebrow">MISSION BRIEFING</div>
+      <div id="w-title"></div>
+      <div id="w-content"></div>
+    </div>
+    <div id="wfoot">
+      <div id="wdots"></div>
+      <button id="w-skip" onclick="closeWelcome()">跳过</button>
+      <button class="btn" id="w-back" onclick="wStep(-1)">上一步</button>
+      <button class="btn solid" id="w-next" onclick="wStep(1)">下一步 ▸</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ════════ 星空 ════════ */
 const cvs=document.getElementById("stars"),ctx=cvs.getContext("2d");
@@ -449,6 +512,61 @@ async function init(){
   setInterval(loadCost,15000);setInterval(loadApprovals,20000);setInterval(loadEvals,60000);
   tele({ts:Date.now()/1000,from_agent:"sys",to_agent:"",type:"status_update",payload:"{}",cost_usd:0},
        "MISSION CONTROL ONLINE · "+agents.length+" CREW ON ORBIT");
+  maybeWelcome();
+}
+
+/* ════════ 欢迎 / 分步引导 ════════ */
+const CREW_BLURB={researcher:"深度研究 / 长文档 / 竞品",writer:"中文文案 / 小红书 / 脚本",
+  coder:"代码生成 / 审查 / 测试",analyst:"数据分析 / 数学 / 财务",builder:"行政 / 合同 / 邮件",
+  runner:"批量 / 格式转换 / 日志",perceiver:"视频 / 图像理解"};
+function anyKeySet(){return agents.some(a=>(a.channels||[]).some(c=>c.key_set))}
+function wSteps(){
+  const roster=agents.map(a=>`<div class="wrow"><span class="wk">${CALLSIGN[a.name]||a.name}</span>`
+    +`<span><b>${a.model}</b> · ${CREW_BLURB[a.name]||""}</span></div>`).join("");
+  const keyed=anyKeySet();
+  const uplink=agents.map(a=>{const ok=(a.channels||[]).some(c=>c.key_set);
+    return `<span class="pill ${ok?'ok':'no'}">${CALLSIGN[a.name]||a.name} ${ok?'就绪':'缺 key'}</span>`}).join(" ");
+  return [
+    {eyebrow:"MISSION BRIEFING",title:`欢迎登上 <span class="accent">CREWOS</span>`,
+     html:`<p>这是你的 <b>一人公司 AI 团队操作系统</b>。理念很简单:</p>
+       <p>🧠 <b>贵模型做决策,便宜模型做执行</b> —— Claude Code 当总指挥(CEO)只负责分析、拆解、派单、审阅;真正干活的是 7 个各有专长的便宜模型,成本比全用旗舰省 85%+。</p>
+       <p>这个引导会用 1 分钟带你认识乘组、配好 key、看懂风险分级和怎么派活。随时点右上角 <code>? GUIDE</code> 重看。</p>`},
+    {eyebrow:"YOUR CREW · 乘组",title:`7 名专属模型乘组`,
+     html:`<p>每个 agent 只绑一个 LLM —— 角色专注、记忆不丢、行为可预测。<b>宁死不换模型</b>:挂了就等通道恢复,绝不偷偷换。</p>${roster}`},
+    {eyebrow:"FUEL · API KEYS",title:`配一个 key 就能起飞`,
+     html:`<p>当前通道状态:</p><p>${uplink}</p>
+       <p>${keyed?'✅ <b>已检测到 key,可以直接派单。</b>':'⚠️ <b>还没配 key。</b>'}最省事的做法:填一个 <code>OPENROUTER_KEY</code>(一把覆盖大多数模型)。</p>
+       <p>编辑 <code>~/.crewos/.env</code> 加一行:<br><code>OPENROUTER_KEY="sk-or-…"</code><br>然后重启 <code>crewos start</code>。也可重跑 <code>crewos onboard</code> 交互录入。key 只存在本地、永不进 agent 上下文。</p>`},
+    {eyebrow:"GUARDRAILS · 风险分级",title:`风险越大,汇报越大`,
+     html:`<p>每个对外动作按 L0–L4 自动分级,你只在关键节点被打扰:</p>
+       <div class="wrow"><span class="wlvl">L0</span><span>纯读取 —— 静默执行</span></div>
+       <div class="wrow"><span class="wlvl">L1</span><span>内部写 —— 入台账可查</span></div>
+       <div class="wrow"><span class="wlvl">L2</span><span>外部只读 —— 看板横幅通知</span></div>
+       <div class="wrow"><span class="wlvl">L3</span><span>可逆外部写 —— 倒计时卡片,N 秒无人反对自动放行</span></div>
+       <div class="wrow"><span class="wlvl">L4</span><span>不可逆(发布/花钱)—— 右下角卡片,等你 GO / NO-GO</span></div>
+       <p>另有 DLP 出入站红线、预算熔断、Silent Watchdog 盯死卡死任务。</p>`},
+    {eyebrow:"LAUNCH · 怎么派活",title:`两种驱动方式`,
+     html:`<p><b>① 手动(调试用)</b>:底部 <code>TRANSMIT</code> 选一个乘组成员直接下指令,或命令行 <code>crewos dispatch writer "写条小红书文案"</code>。</p>
+       <p><b>② 让 Claude Code 当 CEO(推荐)</b>:<br><code>claude mcp add crewos -- crewos mcp</code><br>之后对 Claude 说"帮我研究X / 写个feature",它会自动拆解、派单、审阅(≤3轮)、复盘,看板实时直播。</p>
+       <p>三个视图:<b>ORBIT</b> 看谁在干活 · <b>MISSIONS</b> 看任务与回放 · <b>CONFIG</b> 调一切(含换脑、预算、定时、通知)。</p>
+       <p>准备好了 —— 开始指挥你的 AI 团队吧。🚀</p>`},
+  ];
+}
+let _wi=0,_wsteps=[];
+function openWelcome(){_wsteps=wSteps();_wi=0;renderW();$("#welcome").classList.add("open")}
+function closeWelcome(){$("#welcome").classList.remove("open");try{localStorage.setItem("crewos_welcomed","1")}catch(e){}}
+function wStep(d){_wi=Math.max(0,Math.min(_wsteps.length-1,_wi+d));
+  if(_wi===_wsteps.length-1&&d>0&&$("#w-next").dataset.last==="1"){closeWelcome();return}renderW()}
+function renderW(){
+  const s=_wsteps[_wi],last=_wi===_wsteps.length-1;
+  $("#w-eyebrow").textContent=s.eyebrow;$("#w-title").innerHTML=s.title;$("#w-content").innerHTML=s.html;
+  $("#wdots").innerHTML=_wsteps.map((_,i)=>`<i class="${i===_wi?'on':''}" onclick="_wi=${i};renderW()"></i>`).join("");
+  $("#w-back").style.visibility=_wi?"visible":"hidden";
+  const nx=$("#w-next");nx.textContent=last?"开始使用 ✓":"下一步 ▸";nx.dataset.last=last?"1":"0";
+}
+function maybeWelcome(){
+  let seen=false;try{seen=localStorage.getItem("crewos_welcomed")==="1"}catch(e){}
+  if(!seen)openWelcome();   // 仅首次自动引导;之后点右上角 ? GUIDE 重看
 }
 
 /* ════════ 轨道布局与公转 ════════ */

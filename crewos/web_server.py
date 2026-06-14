@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import re
 import threading
 import time
@@ -397,6 +398,85 @@ def api_approval_decide(approval_id: str, body: ApprovalDecision):
     return res
 
 
+# ---------- 供应商目录 + 一键粘 key(Hermes/OpenClaw 式) ----------
+
+def _env_has(key_env: str) -> bool:
+    """key 是否已配:先看进程环境,再看 .env 文件(支持运行中手改)。"""
+    if not key_env:
+        return False
+    if os.environ.get(key_env):
+        return True
+    f = ROOT / ".env"
+    if f.exists():
+        import re as _re
+        for line in f.read_text(encoding="utf-8").splitlines():
+            m = _re.match(r'(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*["\']?([^"\']*)', line.strip())
+            if m and m.group(1) == key_env and m.group(2):
+                return True
+    return False
+
+
+@app.get("/api/providers")
+def api_providers():
+    from . import providers as provcat
+    out = []
+    for p in provcat.load_providers(ROOT):
+        out.append({**{k: p.get(k) for k in
+                       ("id", "name", "endpoint", "key_env", "signup", "note")},
+                    "custom": bool(p.get("custom")),
+                    "key_set": _env_has(p.get("key_env", ""))})
+    return out
+
+
+@app.get("/api/recommendations")
+def api_recommendations():
+    """每个 agent 的推荐模型 + 理由 + 可用供应商。"""
+    from .providers import RECOMMENDATIONS
+    return RECOMMENDATIONS
+
+
+class ProviderKeyReq(BaseModel):
+    key_env: str
+    api_key: str
+
+
+@app.post("/api/provider-key")
+def api_provider_key(req: ProviderKeyReq):
+    """粘贴 API key:写入 ~/.crewos/.env(权限 600)并即时生效(免重启)。
+    key 只活在环境变量,永不进 agent 上下文。"""
+    from .workspace import write_env
+    ke = req.key_env.strip()
+    if not ke:
+        return JSONResponse({"error": "bad_key_env"}, status_code=422)
+    write_env(ROOT, {ke: req.api_key.strip()})
+    if req.api_key.strip():
+        os.environ[ke] = req.api_key.strip()   # 即时生效,本次会话立刻可派单
+    return {"ok": True, "key_env": ke, "key_set": bool(req.api_key.strip())}
+
+
+class CustomProviderReq(BaseModel):
+    name: str
+    endpoint: str
+    key_env: str = ""
+    api_key: str = ""
+    note: str = ""
+
+
+@app.post("/api/providers")
+def api_add_provider(req: CustomProviderReq):
+    from . import providers as provcat
+    from .workspace import write_env
+    try:
+        rec = provcat.add_custom_provider(ROOT, req.name, req.endpoint,
+                                          key_env=req.key_env, note=req.note)
+    except ValueError as e:
+        return JSONResponse({"error": "invalid_provider", "detail": str(e)}, status_code=422)
+    if req.api_key.strip():
+        write_env(ROOT, {rec["key_env"]: req.api_key.strip()})
+        os.environ[rec["key_env"]] = req.api_key.strip()
+    return {"ok": True, "provider": rec, "key_set": bool(req.api_key.strip())}
+
+
 @app.get("/api/settings")
 def api_get_settings():
     return _settings()
@@ -460,6 +540,44 @@ def api_put_agent(name: str, cfg: AgentCfg):
     _ledger().log("system", "status_update", "user", name, payload={
         "summary": f"LLM 绑定变更 → {cfg.model}(档案/记忆全部留任)"})
     return {"ok": True, "agent": name, "model": cfg.model}
+
+
+class BindReq(BaseModel):
+    model: str
+    provider_id: str
+    fallback_model: str = ""
+    add_failover: bool = True   # 非 openrouter 时自动追加 openrouter 备用通道
+
+
+@app.put("/api/agent/{name}/bind")
+def api_bind_agent(name: str, req: BindReq):
+    """换脑不换人 · 简化版:选模型 + 选供应商,自动派生通道。供 UI「用推荐」一键绑定。
+    保留该 agent 现有的定价与温度,只换模型与通道。"""
+    from . import providers as provcat
+    if name not in _router().list_agents():
+        return JSONResponse({"error": "unknown_agent"}, status_code=404)
+    prov = provcat.get_provider(ROOT, req.provider_id)
+    if not prov:
+        return JSONResponse({"error": "unknown_provider"}, status_code=404)
+    f = ROOT / "agents" / name / "provider.yaml"
+    cur = yaml.safe_load(f.read_text(encoding="utf-8")) if f.exists() else {}
+    channels = [{"name": prov["id"], "endpoint": prov["endpoint"], "key_env": prov["key_env"]}]
+    # 非 openrouter 且 openrouter 已配 key → 自动追加为 failover 备用通道
+    if req.add_failover and prov["id"] != "openrouter" and _env_has("OPENROUTER_KEY"):
+        channels.append({"name": "openrouter", "endpoint": "https://openrouter.ai/api/v1",
+                         "key_env": "OPENROUTER_KEY"})
+    doc = {
+        "model": req.model,
+        "channels": channels,
+        "fallback_model": req.fallback_model or (cur or {}).get("fallback_model", ""),
+        "pricing": (cur or {}).get("pricing", {"input_per_m": 1.0, "output_per_m": 2.0}),
+        "temperature": (cur or {}).get("temperature", 0.7),
+    }
+    f.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    _ledger().log("system", "status_update", "user", name, payload={
+        "summary": f"绑定 → {req.model} @ {prov['name']}(记忆/错题本留任)"})
+    return {"ok": True, "agent": name, "model": req.model, "provider": prov["id"],
+            "key_set": _env_has(prov["key_env"])}
 
 
 class FileReq(BaseModel):

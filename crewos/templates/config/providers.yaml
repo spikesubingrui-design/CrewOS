@@ -1,0 +1,14 @@
+# 自定义供应商 —— 内置供应商(OpenRouter/OpenAI/Anthropic/DeepSeek/Moonshot/
+# 智谱/百炼/火山方舟)已在代码里,无需在此声明,直接在看板「供应商」面板粘 key 即可。
+#
+# 这里只放你自己的额外供应商(任何 OpenAI 兼容 /v1 端点)。也可在看板点
+# 「+ CUSTOM PROVIDER」表单新增,会自动写到这里。key 仍存 ~/.crewos/.env。
+#
+# 格式示例:
+# custom:
+#   - id: my_proxy
+#     name: 我的中转
+#     endpoint: https://my-proxy.example.com/v1
+#     key_env: MY_PROXY_KEY
+#     note: 公司内网中转
+custom: []

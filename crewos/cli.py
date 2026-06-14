@@ -60,8 +60,9 @@ def cmd_onboard(args):
   crewos start                          # 打开 Mission Control
   claude mcp add crewos -- crewos mcp   # 让 Claude Code (CC) 上岗当总指挥
 
-先在 ~/.crewos/.env 填一个 key(推荐 OPENROUTER_KEY,一把覆盖大多数模型),
-或重跑 crewos onboard 交互录入,然后 crewos start 即可真实派单。
+配 key 最省事的方式:crewos start 打开看板 → CONFIG → 供应商面板,挑一个供应商
+(推荐 OpenRouter,一把覆盖大多数模型)粘上 API key 点保存,即时生效。
+每个 agent 旁边都有推荐模型与理由,点「用推荐」一键绑定。也支持自定义供应商。
 想先看界面动效不花钱:在线宣传页 https://spikesubingrui-design.github.io/CrewOS/""")
 
 

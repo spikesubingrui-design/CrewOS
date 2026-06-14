@@ -177,9 +177,26 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
 .chip{display:inline-block;font-size:9px;letter-spacing:.1em;padding:3px 9px;margin:2px 4px 2px 0;
   border:1px solid;border-radius:1px}
 .chip.ok{color:var(--green);border-color:rgba(46,229,157,.4)}
-.chip.no{color:var(--red);border-color:rgba(255,92,92,.35)}
-#uplink div{padding:5px 0;font-size:11px}
-#uplink b{letter-spacing:.1em;font-weight:600;display:inline-block;width:96px}
+.chip.no{color:var(--amber);border-color:rgba(255,180,84,.4)}
+/* 供应商面板 */
+.provrow{padding:12px 0;border-bottom:1px solid var(--line)}
+.provrow:last-child{border-bottom:none}
+.provhd{display:flex;align-items:center;gap:8px;font-size:12px}
+.provhd b{font-weight:600;letter-spacing:.03em}
+.provhd a{color:var(--ice);text-decoration:none}.provhd a:hover{text-decoration:underline}
+.provnote{font-size:10.5px;color:var(--dim);margin:5px 0 8px;line-height:1.6}
+.provkey{display:grid;grid-template-columns:1fr auto;gap:8px}
+.provkey input{background:rgba(2,5,12,.6)}
+input[type=password]{background:var(--panel-solid);border:1px solid var(--line);color:var(--text);
+  font-family:var(--mono);font-size:12px;padding:10px 13px;border-radius:2px;outline:none}
+input[type=password]:focus{border-color:var(--blue)}
+/* 推荐横幅 */
+.recbox{background:rgba(79,124,255,.07);border:1px solid var(--line-strong);border-radius:3px;
+  padding:11px 13px;margin-bottom:14px}
+.rechd{font-size:12px;color:var(--ice);font-weight:600;letter-spacing:.03em}
+.rechd b{color:#fff}
+.recwhy{font-size:11px;color:#aebbd8;line-height:1.65;margin:5px 0 7px}
+.recprov{font-size:10px;color:var(--dim)}
 
 /* ───── ALERT ───── */
 #alerts{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:200;
@@ -341,8 +358,20 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
         </div>
       </div>
       <div class="panel" style="margin-top:16px">
-        <div class="panel-h"><span class="micro">Uplink Status / API 通道</span></div>
-        <div class="cfg-body" id="uplink"></div>
+        <div class="panel-h"><span class="micro">Providers / 供应商 · 粘 key 即用</span>
+          <span class="micro" style="color:var(--dim)">key 只存本地 .env</span></div>
+        <div class="cfg-body" id="providers"></div>
+        <div class="cfg-body" style="border-top:1px solid var(--line)">
+          <div class="micro" style="margin-bottom:10px;color:var(--ice)">+ CUSTOM PROVIDER(任何 OpenAI 兼容端点)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <input type="text" id="cp-name" placeholder="名称 如 我的中转">
+            <input type="text" id="cp-endpoint" placeholder="https://…/v1">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+            <input type="text" id="cp-key" placeholder="API key(可留空稍后填)">
+            <button class="btn" onclick="addCustomProvider()">+ ADD PROVIDER</button>
+          </div>
+        </div>
       </div>
       <div class="panel" style="margin-top:16px">
         <div class="panel-h"><span class="micro">Crew Performance / 模型胜任度</span>
@@ -357,6 +386,13 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
         <div class="cfg-body">
           <div class="frow"><label class="micro">Crew member</label>
             <select id="llm-agent" onchange="llmLoad()" style="width:100%"></select></div>
+          <div id="llm-rec"></div>
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;align-items:end">
+            <div class="frow" style="margin-bottom:0"><label class="micro">Provider 供应商</label>
+              <select id="llm-provider" style="width:100%"></select></div>
+            <button class="btn solid" style="margin-bottom:0" onclick="useRecommended()">用推荐 ✦</button>
+          </div>
+          <div class="micro" style="margin:14px 0 6px;color:var(--dim)">— 或手动精调 —</div>
           <div style="display:grid;grid-template-columns:2fr 2fr 1fr;gap:12px">
             <div class="frow"><label class="micro">Model ID(OpenAI 兼容名)</label>
               <input type="text" id="llm-model" style="width:100%"></div>
@@ -458,7 +494,7 @@ const CALLSIGN={coder:"CODER-1",writer:"WRITER-1",researcher:"RECON-1",analyst:"
   builder:"BUILD-1",runner:"CARGO-1",perceiver:"OPTIC-1"};
 const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
 const esc=s=>(s||"").replace(/</g,"&lt;");
-let agents=[],agentCost={},totalCost=0,nodePos={},orbitT=0,replayMode=false;
+let agents=[],agentCost={},totalCost=0,nodePos={},orbitT=0,replayMode=false,providers=[],recs={};
 
 /* 访问令牌:任意请求 401 → 询问 token 并以 ?token= 重进(服务端会种 cookie) */
 const _fetch=window.fetch.bind(window);
@@ -507,7 +543,9 @@ async function init(){
        <option value="agents/${a.name}/actions.yaml">${cs} — 动作风险表</option>
        <option value="agents/${a.name}/memory/lessons.md">${cs} — 错题本</option>`);
   });
-  layoutOrbit();orbitTick();renderUplink();llmInit();loadCost();loadSettings();loadFile();connectWS();
+  providers=await (await fetch("/api/providers")).json();
+  recs=await (await fetch("/api/recommendations")).json();
+  layoutOrbit();orbitTick();loadProviders();llmInit();loadCost();loadSettings();loadFile();connectWS();
   loadApprovals();loadEvals();
   setInterval(loadCost,15000);setInterval(loadApprovals,20000);setInterval(loadEvals,60000);
   tele({ts:Date.now()/1000,from_agent:"sys",to_agent:"",type:"status_update",payload:"{}",cost_usd:0},
@@ -519,13 +557,15 @@ async function init(){
 const CREW_BLURB={researcher:"深度研究 / 长文档 / 竞品",writer:"中文文案 / 小红书 / 脚本",
   coder:"代码生成 / 审查 / 测试",analyst:"数据分析 / 数学 / 财务",builder:"行政 / 合同 / 邮件",
   runner:"批量 / 格式转换 / 日志",perceiver:"视频 / 图像理解"};
-function anyKeySet(){return agents.some(a=>(a.channels||[]).some(c=>c.key_set))}
+function anyKeySet(){return (providers||[]).some(p=>p.key_set)||agents.some(a=>(a.channels||[]).some(c=>c.key_set))}
 function wSteps(){
-  const roster=agents.map(a=>`<div class="wrow"><span class="wk">${CALLSIGN[a.name]||a.name}</span>`
-    +`<span><b>${a.model}</b> · ${CREW_BLURB[a.name]||""}</span></div>`).join("");
+  const roster=agents.map(a=>{const r=recs[a.name];
+    return `<div class="wrow"><span class="wk">${CALLSIGN[a.name]||a.name}</span>`
+    +`<span><b>${(r&&r.model)||a.model}</b> · ${CREW_BLURB[a.name]||""}`
+    +`${r?`<br><span style="color:var(--dim);font-size:11px">✦ ${esc(r.reason)}</span>`:''}</span></div>`}).join("");
   const keyed=anyKeySet();
-  const uplink=agents.map(a=>{const ok=(a.channels||[]).some(c=>c.key_set);
-    return `<span class="pill ${ok?'ok':'no'}">${CALLSIGN[a.name]||a.name} ${ok?'就绪':'缺 key'}</span>`}).join(" ");
+  const uplink=(providers||[]).map(p=>
+    `<span class="pill ${p.key_set?'ok':'no'}">${p.name.split(' ')[0]} ${p.key_set?'✓':'缺'}</span>`).join(" ");
   return [
     {eyebrow:"MISSION BRIEFING",title:`欢迎登上 <span class="accent">CREWOS</span>`,
      html:`<p>这是你的 <b>一人公司 AI 团队操作系统</b>。理念很简单:</p>
@@ -533,10 +573,10 @@ function wSteps(){
        <p>这个引导会用 1 分钟带你认识乘组、配好 key、看懂风险分级和怎么派活。随时点右上角 <code>? GUIDE</code> 重看。</p>`},
     {eyebrow:"YOUR CREW · 乘组",title:`7 名专属模型乘组`,
      html:`<p>每个 agent 只绑一个 LLM —— 角色专注、记忆不丢、行为可预测。<b>宁死不换模型</b>:挂了就等通道恢复,绝不偷偷换。</p>${roster}`},
-    {eyebrow:"FUEL · API KEYS",title:`配一个 key 就能起飞`,
-     html:`<p>当前通道状态:</p><p>${uplink}</p>
-       <p>${keyed?'✅ <b>已检测到 key,可以直接派单。</b>':'⚠️ <b>还没配 key。</b>'}最省事的做法:填一个 <code>OPENROUTER_KEY</code>(一把覆盖大多数模型)。</p>
-       <p>编辑 <code>~/.crewos/.env</code> 加一行:<br><code>OPENROUTER_KEY="sk-or-…"</code><br>然后重启 <code>crewos start</code>。也可重跑 <code>crewos onboard</code> 交互录入。key 只存在本地、永不进 agent 上下文。</p>`},
+    {eyebrow:"FUEL · 供应商",title:`选供应商,粘一个 key`,
+     html:`<p>当前供应商状态:</p><p>${uplink}</p>
+       <p>${keyed?'✅ <b>已配好 key,可以直接派单。</b>':'⚠️ <b>还没配 key。</b>'}和 Hermes / OpenClaw 一样:去 <b>CONFIG → 供应商</b> 面板,挑一个供应商把 API key 粘进去、点保存,<b>即时生效不用重启</b>。</p>
+       <p>最省事:只配 <b>OpenRouter</b> 一个(一把 key 覆盖 400+ 模型)。也支持 <b>+ CUSTOM PROVIDER</b> 接任何 OpenAI 兼容端点。key 只存本地 <code>~/.crewos/.env</code>、永不进 agent 上下文。</p>`},
     {eyebrow:"GUARDRAILS · 风险分级",title:`风险越大,汇报越大`,
      html:`<p>每个对外动作按 L0–L4 自动分级,你只在关键节点被打扰:</p>
        <div class="wrow"><span class="wlvl">L0</span><span>纯读取 —— 静默执行</span></div>
@@ -879,6 +919,7 @@ function llmInit(){
     sel.insertAdjacentHTML("beforeend",`<option value="${a.name}">${CALLSIGN[a.name]||a.name} — ${a.model}</option>`);
   llmLoad();
 }
+function provName(id){const p=providers.find(x=>x.id===id);return p?p.name:id}
 function llmLoad(){
   const a=agents.find(x=>x.name===$("#llm-agent").value);if(!a)return;
   $("#llm-model").value=a.model;$("#llm-fallback").value=a.fallback_model||"";
@@ -886,6 +927,36 @@ function llmLoad(){
   $("#llm-channels").innerHTML="";
   a.channels.forEach(c=>llmAddCh(c.name,c.endpoint,c.key_env||""));
   $("#llm-status").textContent="";
+  // 推荐横幅
+  const rec=recs[a.name];const box=$("#llm-rec");
+  if(rec){
+    const ready=(rec.providers||[]).filter(pid=>{const p=providers.find(x=>x.id===pid);return p&&p.key_set});
+    box.innerHTML=`<div class="recbox">
+      <div class="rechd">✦ 推荐 <b>${rec.model}</b></div>
+      <div class="recwhy">${esc(rec.reason)}</div>
+      <div class="recprov">可用供应商:${(rec.providers||[]).map(pid=>
+        `<span class="chip ${providers.find(x=>x.id===pid)?.key_set?'ok':'no'}">${provName(pid)}${providers.find(x=>x.id===pid)?.key_set?' ✓':' 缺key'}</span>`).join("")}</div>
+    </div>`;
+  } else box.innerHTML=`<div class="recbox"><div class="recwhy">自定义 agent,无内置推荐。手动精调即可。</div></div>`;
+  // 供应商下拉:优先列推荐的,其次全部
+  const psel=$("#llm-provider");const order=rec?rec.providers:[];
+  const sorted=[...providers].sort((x,y)=>(order.indexOf(y.id))-(order.indexOf(x.id)));
+  psel.innerHTML=sorted.map(p=>`<option value="${p.id}">${p.name}${p.key_set?' ✓':' (缺key)'}</option>`).join("");
+}
+async function useRecommended(){
+  const name=$("#llm-agent").value,rec=recs[name],pid=$("#llm-provider").value;
+  const model=rec?rec.model:$("#llm-model").value.trim();
+  if(!model){alert_("err","CONFIG","无推荐模型,请手动填 Model ID");return}
+  const r=await fetch("/api/agent/"+name+"/bind",{method:"PUT",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({model,provider_id:pid})});
+  if(!r.ok){const e=await r.json();alert_("err","CONFIG",e.detail||e.error||"绑定失败");return}
+  const d=await r.json();
+  alert_(d.key_set?"info":"warn","ASSIGNMENT",
+    `${CALLSIGN[name]||name} → ${model} @ ${provName(pid)}`+(d.key_set?"":" — 该供应商还没配 key,记得去上面粘"));
+  agents=await (await fetch("/api/agents")).json();llmInit();
+  const a=agents.find(x=>x.name===name);
+  const md=$("#node-"+name+" .md");if(md)md.textContent=a.model;
+  const row=$("#crew-"+name+" .md");if(row)row.textContent=a.model;
 }
 function llmAddCh(name,endpoint,key_env){
   $("#llm-channels").insertAdjacentHTML("beforeend",`
@@ -911,19 +982,51 @@ async function llmSave(){
   $("#llm-status").textContent="COMMITTED";
   alert_("info","ASSIGNMENT",`${CALLSIGN[name]||name} → ${body.model}(记忆与错题本留任)`);
   agents=await (await fetch("/api/agents")).json();
-  renderUplink();llmInit();
+  llmInit();
   const a=agents.find(x=>x.name===name);
   const md=$("#node-"+name+" .md");if(md)md.textContent=a.model;
   const row=$("#crew-"+name+" .md");if(row)row.textContent=a.model;
 }
 
-function renderUplink(){
-  const box=$("#uplink");box.innerHTML="";
-  for(const a of agents){
-    const chips=a.channels.map(c=>
-      `<span class="chip ${c.key_set?"ok":"no"}">${c.name} ${c.key_set?"LOCKED":"NO KEY"}</span>`).join("");
-    box.insertAdjacentHTML("beforeend",`<div><b>${CALLSIGN[a.name]||a.name}</b>${chips}</div>`);
+/* ════════ 供应商面板(粘 key 即用) ════════ */
+function loadProviders(){
+  const box=$("#providers");box.innerHTML="";
+  for(const p of providers){
+    box.insertAdjacentHTML("beforeend",`
+      <div class="provrow">
+        <div class="provhd">
+          <span class="chip ${p.key_set?'ok':'no'}">${p.key_set?'✓ 已配':'缺 key'}</span>
+          <b>${esc(p.name)}</b>${p.custom?' <span class="micro">custom</span>':''}
+          ${p.signup?`<a href="${p.signup}" target="_blank" class="micro" style="margin-left:auto">获取 key ↗</a>`:''}
+        </div>
+        <div class="provnote">${esc(p.note||"")}</div>
+        <div class="provkey">
+          <input type="password" id="pk-${p.id}" placeholder="${p.key_set?'已配置 — 输入可覆盖':'粘贴 '+p.key_env}">
+          <button class="btn" onclick="saveProviderKey('${p.id}','${p.key_env}')">保存</button>
+        </div>
+      </div>`);
   }
+}
+async function saveProviderKey(pid,keyEnv){
+  const v=$("#pk-"+pid).value.trim();
+  if(!v){alert_("warn","PROVIDER","请先粘贴 key");return}
+  const r=await fetch("/api/provider-key",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({key_env:keyEnv,api_key:v})});
+  if(!r.ok){alert_("err","PROVIDER","保存失败");return}
+  alert_("info","PROVIDER",provName(pid)+" key 已保存,即时生效");
+  providers=await (await fetch("/api/providers")).json();
+  loadProviders();llmLoad();   // 刷新推荐横幅里的就绪状态
+}
+async function addCustomProvider(){
+  const name=$("#cp-name").value.trim(),endpoint=$("#cp-endpoint").value.trim(),api_key=$("#cp-key").value.trim();
+  if(!name||!endpoint){alert_("err","PROVIDER","名称与 endpoint 必填");return}
+  const r=await fetch("/api/providers",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name,endpoint,api_key})});
+  if(!r.ok){const e=await r.json();alert_("err","PROVIDER",e.detail||"添加失败");return}
+  $("#cp-name").value="";$("#cp-endpoint").value="";$("#cp-key").value="";
+  alert_("info","PROVIDER","自定义供应商已添加");
+  providers=await (await fetch("/api/providers")).json();
+  loadProviders();llmLoad();
 }
 init();
 </script>

@@ -12,14 +12,30 @@
    glm-5.1  ds-flash  doubao-seed(视频理解)
 ```
 
+## 环境要求
+
+- **Python ≥ 3.10**(3.10 / 3.12 已在 CI 验证,3.14 亦可)
+- pip ≥ 22,或 [pipx](https://pipx.pypa.io)(推荐:隔离安装,不污染全局)
+- macOS / Linux(Windows 未测)
+- 浏览器(看板)。可选:`gbrain`(接 U 第二大脑,见 [docs/MEMORY.md](docs/MEMORY.md))
+
 ## 安装(与 Hermes/OpenClaw 同款体验)
 
 ```bash
-git clone <repo> && cd crewos     # 或直接进入本目录
-bash install.sh                   # = pip install .
-crewos onboard                    # 交互式向导:工作区 + API keys(可全部回车跳过)
-crewos start                      # 启动 Mission Control,自动打开浏览器
+# 方式一:pipx(推荐)
+pipx install git+<repo-url>          # 或本地:pipx install .
+
+# 方式二:pip
+git clone <repo> && cd CrewOS
+pip install .                         # 或 bash install.sh
+
+# 然后:
+crewos onboard                        # 交互式向导:工作区 + API keys(可全部回车跳过)
+crewos start                          # 启动 Mission Control,自动打开浏览器(默认 http://127.0.0.1:8466)
 ```
+
+**第一次跑:** `crewos start` → 浏览器开 CONFIG → 在角色卡里给「总指挥 CEO」选一个供应商+粘 API key(推荐 DeepSeek/OpenRouter)→ 回 ORBIT,在底部 TRANSMIT 输入一个目标(如「做一个马里奥小游戏」)选「CDR·CEO 自动编排」→ 看团队规划→派单→交付,产出文件在任务流里点链接即开。
+排错见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
 
 - 所有数据住在 `~/.crewos`(agent 档案/记忆/台账/key),升级 crewos 不丢任何东西
 - key 写入 `~/.crewos/.env`(权限 600),只活在环境变量,永不进 agent 上下文
@@ -103,8 +119,11 @@ crewos -w /其他/工作区 start        # 多团队隔离(像 mmclaw -w)
 python3 -m pytest tests/   # 38 项:派单台账/failover/宕机上报/DLP双向/熔断与提额/回放/风险分级/错题本/cron/通知/记忆/多模态/评估/检查层/心跳/校验/watchdog/暂停门禁/doctor/行为评估/paperclip适配器
 ```
 
-## 对标分析(docs/)
+## 文档(docs/)
 
+- [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — 常见错误 + `crewos doctor` 排错与监控
+- [CHECKS.md](docs/CHECKS.md) — 自动检查层(6 种机器验收)怎么用
+- [MEMORY.md](docs/MEMORY.md) — 三层记忆:错题本 / Memory Tree / U 第二大脑
 - [HARNESS-UPGRADES.md](docs/HARNESS-UPGRADES.md) — 旗舰模型 harness 逐条拆解的 35 项升级图
 - [PAPERCLIP-UPGRADES.md](docs/PAPERCLIP-UPGRADES.md) — paperclip 70k★ 生态对标的 31 项升级 + 差异化定位
 - [PAPERCLIP-ADAPTER.md](docs/PAPERCLIP-ADAPTER.md) — 把 CrewOS 乘组接进 Paperclip 的接法

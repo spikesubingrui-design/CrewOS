@@ -161,6 +161,7 @@ def _call_openai_compatible(channel: Channel, model: str, messages: list[dict],
         content = f"[mock:{model}@{channel.name}] 已处理任务: {last_user[:120]}"
         return {
             "content": content,
+            "finish_reason": "stop",
             "tokens_in": sum(len(_content_text(m["content"])) for m in messages) // 4,
             "tokens_out": len(content) // 4,
         }
@@ -182,8 +183,15 @@ def _call_openai_compatible(channel: Channel, model: str, messages: list[dict],
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read())
     usage = data.get("usage", {})
+    choice = (data.get("choices") or [{}])[0]
+    msg = choice.get("message") or {}
+    content = msg.get("content") or ""        # 有的供应商返回 null
+    # 推理模型偶尔把 max_tokens 烧在思维链上、正文留空;此时退而取 reasoning_content,至少不丢
+    if not content.strip():
+        content = (msg.get("reasoning_content") or "").strip()
     return {
-        "content": data["choices"][0]["message"]["content"],
+        "content": content,
+        "finish_reason": choice.get("finish_reason") or "",
         "tokens_in": usage.get("prompt_tokens", 0),
         "tokens_out": usage.get("completion_tokens", 0),
     }
@@ -305,7 +313,7 @@ class Router:
             return None
 
     def dispatch(self, name: str, instruction: str, context: str = "",
-                 task_id: str = "", round: int = 0, max_tokens: int = 4096,
+                 task_id: str = "", round: int = 0, max_tokens: int = 8192,
                  budget_usd: float | None = None, media_url: str = "",
                  checks: list[dict] | None = None) -> dict:
         """CC 派单入口。返回结果 + 成本明细;DLP 拦截时返回 redacted 文本。
@@ -406,6 +414,19 @@ class Router:
                 "reason": "产出包含敏感信息,已脱敏并拦截原文",
                 "hits": scan_res.hits, "agent": name})
 
+        # 空产出诊断:模型烧光 max_tokens 却没正文(常见于推理模型 max_tokens 太小被思维链占满)
+        finish = result.get("finish_reason", "")
+        empty = not content.strip()
+        empty_reason = ""
+        if empty:
+            hit_cap = finish == "length" or result["tokens_out"] >= max_tokens
+            empty_reason = (
+                f"成员未产出正文(finish={finish or '未知'},out_tokens={result['tokens_out']}/{max_tokens})。"
+                + ("多半是 max_tokens 被思维链占满就截断 —— 调大 max_tokens,或给该成员换非纯推理模型。"
+                   if hit_cap else "模型返回了空内容,检查模型 ID / 提示词是否合适。"))
+            self.ledger.log(task_id, "escalation", name, "user", payload={
+                "reason": empty_reason, "summary": "本次派单无产出 —— " + empty_reason})
+
         # 自动检查层:机器先验收硬指标,CEO 只看标红项
         check_report = run_checks(content, checks or [])
 
@@ -415,6 +436,8 @@ class Router:
                         cost_usd=cost,
                         payload={"summary": content[:200],
                                  "dlp_blocked": scan_res.blocked,
+                                 "finish_reason": finish,
+                                 "empty": empty, "empty_reason": empty_reason,
                                  "checks_passed": check_report["passed"],
                                  "check_failures": check_report["failures"]})
 
@@ -425,6 +448,9 @@ class Router:
             "model": agent.model,
             "channel": used_channel,
             "content": content,
+            "finish_reason": finish,
+            "empty": empty,
+            "empty_reason": empty_reason,
             "tokens_in": result["tokens_in"],
             "tokens_out": result["tokens_out"],
             "cost_usd": _r6(cost),

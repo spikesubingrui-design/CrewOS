@@ -124,6 +124,8 @@ nav{display:flex;gap:4px;height:100%}
 .tl .alert{color:var(--red);font-weight:600}.tl .done{color:var(--green);font-weight:600}
 .tl .retro{color:#b79cff}.tl .cost{color:var(--amber)}
 .tl .brief{color:#8da0c5;display:block;padding-left:14px}
+.tl .dlink{color:var(--green);text-decoration:underline;cursor:pointer;font-weight:600}
+.tl .dlink:hover{color:var(--ice)}
 
 /* 传输台 */
 #transmit{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:13px 18px}
@@ -398,8 +400,8 @@ input[type=password]:focus{border-color:var(--blue)}
         <select id="orbit-size" onchange="applyCrewVisuals()">
           <option value="uniform" data-i18n="size_uniform">均匀</option>
           <option value="tasks" data-i18n="size_tasks">按任务数</option>
-          <option value="cost" data-i18n="size_cost">按成本</option>
-          <option value="tokens" data-i18n="size_tokens">按 token</option>
+          <option value="cost" data-i18n="size_cost">按花费</option>
+          <option value="tokens" data-i18n="size_tokens">按token</option>
         </select>
       </div>
       <div id="cmd-node">
@@ -696,7 +698,7 @@ const I18N={
   sec_dossier:{zh:"档案编辑 / Dossiers",en:"Dossiers / raw config"},
   orbit_size:{zh:"节点大小",en:"Node size"},
   size_uniform:{zh:"均匀",en:"Uniform"},size_tasks:{zh:"按任务数",en:"By tasks"},
-  size_cost:{zh:"按成本",en:"By cost"},size_tokens:{zh:"按 token",en:"By tokens"},
+  size_cost:{zh:"按花费",en:"By spend"},size_tokens:{zh:"按token",en:"By tokens"},
   more_opts:{zh:"⋯ 更多(备用模型 / 温度)",en:"⋯ More (fallback / temperature)"},
   fb_model:{zh:"备用模型(交接,需授权才启用)",en:"Fallback model (handoff, needs approval)"},
   add_agent:{zh:"+ 新增成员",en:"+ Add member"},
@@ -1066,6 +1068,12 @@ async function loadApprovals(){
   for(const p of pend)apAdd({approval_id:p.id,risk:p.risk,action:p.action,
     summary:p.summary,deadline_ts:p.deadline_ts},p.agent);
 }
+// 把交付文件路径(/deliverables/<task>/<file>)渲染成可点链接,新窗口直接打开/运行
+function linkifyBrief(s){
+  return s.replace(/\/deliverables\/[A-Za-z0-9_.\/-]+/g,
+      m=>`<a href="${m}" target="_blank" class="dlink">▸ ${m.split('/').pop()}</a>`)
+    .replace(/\n/g,"<br>");
+}
 function tele(ev,brief){
   const cls={task_assign:"assign",task_result:"result",review_feedback:"review",task_done:"done",
     retrospect:"retro",escalation:"alert",dlp_block:"alert",budget_block:"alert",failover:"review",
@@ -1078,7 +1086,7 @@ function tele(ev,brief){
   const box=$("#tele-lines");
   box.insertAdjacentHTML("beforeend",
     `<div class="tl"><span class="ts">${ts}</span> ▸ <span class="${cls}">${route} · ${ev.type.toUpperCase()}</span>${cost}
-     ${brief?`<span class="brief">${esc(brief)}</span>`:""}</div>`);
+     ${brief?`<span class="brief">${linkifyBrief(esc(brief))}</span>`:""}</div>`);
   while(box.children.length>300)box.firstChild.remove();
   box.scrollTop=box.scrollHeight;
 }

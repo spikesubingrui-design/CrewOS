@@ -90,3 +90,35 @@ def test_list_models_parses(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeResp(body))
     models = list_models("https://api.deepseek.com/v1", "sk-x")
     assert models == ["deepseek-chat", "deepseek-v4-flash", "deepseek-v4-pro"]  # 去重+排序
+
+
+def test_save_deliverable_extracts_runnable_html():
+    """完整产出落盘 + 把 ```html 抽成可双击运行的 .html(马里奥游戏交付的核心)。"""
+    from crewos.ceo import save_deliverable
+    with tempfile.TemporaryDirectory() as d:
+        content = "好的,游戏如下:\n```html\n<!DOCTYPE html><html><body>MARIO</body></html>\n```\n双击运行。"
+        paths = save_deliverable(d, "task1", "coder", content)
+        assert any(p.endswith("coder.md") for p in paths)        # 永远存完整原文
+        html = [p for p in paths if p.endswith("coder.html")]
+        assert html, paths                                       # 抽出可运行的 html
+        saved = (Path(d) / html[0]).read_text(encoding="utf-8")
+        assert "MARIO" in saved and "<!DOCTYPE html" in saved
+        assert html[0].startswith("deliverables/task1/")         # 相对路径,看板拼成链接
+
+
+def test_dispatch_flags_empty_reasoning_output(monkeypatch):
+    """推理模型烧光 max_tokens 却没正文 → 标 empty + 给出可读原因 + 上报,不再静默空交付。"""
+    from crewos import router as routermod
+    monkeypatch.setattr(
+        routermod, "_call_openai_compatible",
+        lambda ch, m, msgs, temp, mt, **k: {
+            "content": "", "finish_reason": "length", "tokens_in": 10, "tokens_out": mt})
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        router = Router(make_ws(tmp), Ledger(tmp / "l.db"))
+        tid = router.ledger.new_task("做个马里奥游戏")
+        r = router.dispatch("writer", "做个马里奥游戏", task_id=tid)
+        assert r["empty"] is True and r["content"] == ""
+        assert "max_tokens" in r["empty_reason"]            # 原因点明 token 上限
+        types = [e["type"] for e in router.ledger.task_events(tid)]
+        assert "escalation" in types                        # 空交付被显式上报

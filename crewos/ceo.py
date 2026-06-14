@@ -16,8 +16,44 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 from .router import Channel, _call_openai_compatible
+
+# 代码块语言 → 落盘扩展名(把成员产出里的 ```lang 抽成可直接打开/运行的文件)
+_CODE_EXT = {
+    "html": "html", "htm": "html", "javascript": "js", "js": "js", "python": "py",
+    "py": "py", "css": "css", "json": "json", "bash": "sh", "sh": "sh", "shell": "sh",
+    "sql": "sql", "markdown": "md", "md": "md", "typescript": "ts", "ts": "ts",
+    "tsx": "tsx", "jsx": "jsx", "yaml": "yaml", "yml": "yml", "xml": "xml",
+    "c": "c", "cpp": "cpp", "java": "java", "go": "go", "rust": "rs", "rs": "rs",
+}
+
+
+def save_deliverable(root: str | Path, task_id: str, agent: str, content: str) -> list[str]:
+    """把成员的完整产出落盘到 <root>/deliverables/<task_id>/,绝不因预览截断而丢失。
+    顺带把 ```lang 代码块抽成独立文件(如 .html 双击即玩)。返回保存的相对路径列表
+    (形如 deliverables/<task_id>/coder.html),供看板拼成可点链接。"""
+    base = Path(root) / "deliverables" / str(task_id)
+    base.mkdir(parents=True, exist_ok=True)
+    rel = lambda p: str(p.relative_to(root)) if Path(root) in p.parents else str(p)
+    saved = []
+    raw = base / f"{agent}.md"          # 永远存一份完整原文
+    raw.write_text(content, encoding="utf-8")
+    saved.append(rel(raw))
+    blocks = re.findall(r"```([A-Za-z0-9_+-]*)\n(.*?)```", content, re.DOTALL)
+    runnable = []
+    for lang, code in blocks:
+        ext = _CODE_EXT.get((lang or "").lower())
+        if not ext and re.search(r"<!doctype html|<html", code, re.I):
+            ext = "html"               # 没标语言但明显是整页 HTML
+        if ext:
+            runnable.append((ext, code.strip()))
+    for i, (ext, code) in enumerate(runnable, 1):
+        fn = base / (f"{agent}.{ext}" if len(runnable) == 1 else f"{agent}-{i}.{ext}")
+        fn.write_text(code + "\n", encoding="utf-8")
+        saved.append(rel(fn))
+    return saved
 
 PLAN_SYSTEM = """你是 CrewOS 的总指挥(CEO)。你只决策,不亲自执行专业活,但你很聪明。
 先判断这个目标值不值得动用团队:
@@ -84,8 +120,10 @@ def parse_plan(text: str, valid_agents: list[str]) -> list[dict]:
 
 def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
                 fallback_agent: str = "researcher", task_id: str = "",
-                temperature: float = 0.3) -> dict:
-    """跑一次 Web 端 CEO 编排。返回 {task_id, plan, summary, degraded}。"""
+                temperature: float = 0.3, root: str = ".",
+                step_max_tokens: int = 16000) -> dict:
+    """跑一次 Web 端 CEO 编排。返回 {task_id, plan, summary, degraded, deliverables}。
+    step_max_tokens 给得足够大,避免推理模型把额度烧在思维链上、正文被截空(马里奥游戏类大产出尤甚)。"""
     led = router.ledger
     task_id = task_id or led.new_task(goal[:80], created_by="user")
     led.log(task_id, "task_assign", "user", "ceo", payload={"summary": goal})
@@ -124,12 +162,23 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
     led.log(task_id, "status_update", "ceo", payload={
         "summary": f"CEO 已规划 {len(plan)} 个派单:" + "、".join(p["agent"] for p in plan)})
 
-    # 2) 执行派单
+    # 2) 执行派单 —— 完整产出落盘(不截断),预览喂给汇总
     results = []
+    deliverables = []          # [(agent, [相对路径...])]
     for step in plan:
         try:
-            r = router.dispatch(step["agent"], step["instruction"], task_id=task_id)
-            results.append(f"【{step['agent']}】{r['content'][:300]}")
+            r = router.dispatch(step["agent"], step["instruction"],
+                                task_id=task_id, max_tokens=step_max_tokens)
+            content = r.get("content", "") or ""
+            if r.get("empty") or not content.strip():     # 空产出:把原因如实带给汇总,别假装成功
+                why = r.get("empty_reason") or "成员未产出正文(可能 max_tokens 不足或只输出了思维链)"
+                results.append(f"【{step['agent']}】⚠ 无产出:{why}")
+                continue
+            paths = save_deliverable(root, task_id, step["agent"], content)   # 完整存盘
+            deliverables.append((step["agent"], paths))
+            preview = content[:800]
+            results.append(f"【{step['agent']}】{preview}"
+                           + ("…(完整产出已存盘)" if len(content) > 800 else ""))
         except Exception as e:
             results.append(f"【{step['agent']}】(失败:{str(e)[:80]})")
 
@@ -145,5 +194,16 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
     except Exception:
         summary = f"已完成 {len(plan)} 个派单(CEO 汇总调用失败,产出见各任务事件)。"
 
-    led.log(task_id, "task_done", "ceo", "user", payload={"summary": summary})
-    return {"task_id": task_id, "plan": plan, "summary": summary, "degraded": degraded}
+    # 把交付文件路径附到结论里(看板会把 deliverables/ 路径渲染成可点链接,直接打开/运行)
+    flat = [p for _, ps in deliverables for p in ps]
+    if deliverables:
+        lines = []
+        for ag, ps in deliverables:
+            runnable = [p for p in ps if not p.endswith(".md")] or ps
+            lines.append(f"{ag}: " + " ".join("/" + p for p in runnable))
+        summary = (summary + "\n\n📦 交付文件(点开即用):\n" + "\n".join(lines)).strip()
+
+    led.log(task_id, "task_done", "ceo", "user",
+            payload={"summary": summary, "deliverables": flat})
+    return {"task_id": task_id, "plan": plan, "summary": summary,
+            "degraded": degraded, "deliverables": flat}

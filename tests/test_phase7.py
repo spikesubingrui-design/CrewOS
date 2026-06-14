@@ -51,13 +51,15 @@ def test_orchestrate_degrades_on_mock():
         tmp = Path(d)
         router = Router(make_ws(tmp), Ledger(tmp / "l.db"))
         res = orchestrate(router, "mock-model", "mock://", "", "写一篇小红书文案",
-                          fallback_agent="writer")
+                          fallback_agent="writer", root=str(tmp))
         assert res["degraded"] is True
         assert res["plan"] == [{"agent": "writer", "instruction": "写一篇小红书文案"}]
         types = [e["type"] for e in router.ledger.task_events(res["task_id"])]
         assert "task_assign" in types        # user→ceo + ceo→writer
         assert "task_result" in types        # writer 产出
         assert "task_done" in types          # CEO 结案
+        # 完整产出落盘为可取回的交付文件
+        assert res["deliverables"] and (tmp / res["deliverables"][0]).exists()
         # 兜底派单确实跑了 writer
         assert any(e["from_agent"] == "writer" and e["type"] == "task_result"
                    for e in router.ledger.task_events(res["task_id"]))

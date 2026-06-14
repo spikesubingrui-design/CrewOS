@@ -382,9 +382,24 @@ async def api_ceo(req: CeoReq):
 
     def run():
         orchestrate(_router(), model, prov["endpoint"], prov["key_env"],
-                    req.goal, task_id=tid)
+                    req.goal, task_id=tid, root=str(ROOT))
     asyncio.get_running_loop().run_in_executor(None, run)
     return {"ok": True, "task_id": tid, "mode": "ceo_orchestrate"}
+
+
+@app.get("/deliverables/{task_id}/{fname}")
+def serve_deliverable(task_id: str, fname: str):
+    """把 CEO 编排产出的交付文件(如马里奥游戏 .html)直接发给浏览器,点链接即玩。"""
+    safe_task = re.sub(r"[^A-Za-z0-9_.-]", "", task_id)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "", fname)
+    if not safe_task or not safe_name:
+        return JSONResponse({"error": "bad_path"}, status_code=400)
+    base = (ROOT / "deliverables" / safe_task).resolve()
+    p = (base / safe_name).resolve()
+    # 防目录穿越:必须落在 deliverables/<task_id>/ 之内
+    if base not in p.parents or not p.is_file():
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    return FileResponse(str(p))
 
 
 class BudgetReq(BaseModel):

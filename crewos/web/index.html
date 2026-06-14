@@ -223,7 +223,7 @@ textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);colo
 @keyframes cardflash{0%{box-shadow:inset 0 0 0 2px var(--green),0 0 24px rgba(46,229,157,.25)}
   100%{box-shadow:inset 0 0 0 0 transparent,0 0 0 transparent}}
 /* 自动改写模型输入时的就地提示 */
-input.justset{animation:inset 0.9s ease-out}
+input.justset,select.justset{animation:inset 0.9s ease-out}
 @keyframes inset{0%{border-color:var(--green);box-shadow:0 0 0 2px rgba(46,229,157,.35)}
   100%{border-color:var(--line);box-shadow:none}}
 @media(max-width:680px){.rc-grid{grid-template-columns:1fr 1fr}}
@@ -1428,8 +1428,8 @@ function roleCard(key,name,role,model,provId,withRec,fb,temp){
     <div class="rc-top"><span class="rc-name">${esc(name)}</span><span class="rc-role">${esc(role)}</span>${chip}
       ${withRec?`<span class="rc-del" title="删除成员" onclick="delAgent('${key}')">✕</span>`:""}</div>
     <div class="rc-grid">
-      <span><input type="text" id="rcm-${key}" value="${esc(model||"")}" list="rcdl-${key}"
-        placeholder="模型(配好 key 后可下拉选)" style="width:100%"><datalist id="rcdl-${key}"></datalist></span>
+      <span><select id="rcm-${key}" data-cur="${esc(model||"")}" onchange="rcModelSel('${key}')" style="width:100%"></select>
+        <input type="text" id="rcmc-${key}" placeholder="自定义型号 ID" style="display:none;width:100%;margin-top:6px"></span>
       <select id="rcp-${key}" onchange="roleProvChange('${key}')">${provOptions(provId)}</select>
       ${withRec?`<button class="btn" onclick="roleUseRec('${key}')">用推荐</button>`:`<span></span>`}
       <button class="btn solid" onclick="roleSave('${key}',this)">保存</button>
@@ -1474,7 +1474,9 @@ async function renderCrewSetup(){
   box.innerHTML=html;
   const keyed=providers.filter(x=>x.key_set).length;
   $("#setup-count").textContent=`${keyed}/${providers.length} 供应商已配 key`;
-  ["__ceo__",...agents.map(a=>a.name)].forEach(roleKeyRow);
+  const allKeys=["__ceo__",...agents.map(a=>a.name)];
+  allKeys.forEach(roleKeyRow);
+  allKeys.forEach(populateModels);   // 每张卡都填上型号下拉(保留各自已配型号)
 }
 function roleKeyRow(key){   // 根据当前选中的供应商,刷新该卡的 key 状态与输入行
   const pid=$("#rcp-"+key)?.value,p=provById(pid);if(!p)return;
@@ -1485,24 +1487,20 @@ function roleKeyRow(key){   // 根据当前选中的供应商,刷新该卡的 ke
   $("#rckin-"+key).placeholder=p.key_set?`${p.key_env} 已配 — 输入可覆盖`:`为 ${p.name} 粘 API key`;
   krow.classList.toggle("show",!p.key_set);   // 缺 key 时自动展开输入行
   $("#rckn-"+key).textContent=p.key_set?"":`这个 key 写入 ${p.key_env},所有用 ${p.name} 的成员共享`;
-  fillModels(pid,"rcdl-"+key);   // 拉该供应商模型填进 datalist,少手输
 }
-// 用户切换供应商:刷新状态行 + 自动把模型切到该厂商(推荐模型 > 首个可拉到的模型),不再留着上家的型号
+// 用户切换供应商:刷新状态行 + 重填型号下拉(给该厂商全部型号)+ 自动选好默认型号
 async function roleProvChange(key){
   roleKeyRow(key);
-  const pid=$("#rcp-"+key).value,inp=$("#rcm-"+key);if(!inp)return;
-  const rec=recs[key];
-  // 1) 选中的正是该角色推荐渠道 → 直接用推荐型号(必属该厂商)
-  if(rec&&(rec.providers||[]).includes(pid)){inp.value=rec.model;flashInput(inp);return;}
-  // 2) 否则尝试拉该厂商真实模型列表(需已配 key)→ 用首个
-  const models=await fillModels(pid,"rcdl-"+key);
-  // 3) 拉不到(没配 key)就清空,绝不残留上家厂商的型号(如把 glm-5.1 留在 deepseek 上);占位符提示去配 key 再下拉
-  inp.value=(models&&models.length)?models[0]:"";
-  flashInput(inp);
+  const pid=$("#rcp-"+key).value,rec=recs[key];
+  const models=await fetchModels(pid);                 // 该厂商型号(配 key→实时;否则内置常见型号)
+  // 默认选中:选中的正是该角色推荐渠道→用推荐型号;否则用该厂商首个型号
+  const target=(rec&&(rec.providers||[]).includes(pid))?rec.model:(models[0]||"");
+  setModelOptions(key,models,target);                  // 整张下拉都列出来,绝不只剩一个
+  flashInput($("#rcm-"+key));
 }
-// 就地确认:输入框被自动改写时闪一下,让人看见“变了”
-function flashInput(inp){if(!inp)return;inp.classList.remove("justset");void inp.offsetWidth;inp.classList.add("justset");
-  setTimeout(()=>inp.classList.remove("justset"),900);}
+// 就地确认:下拉被自动改写时闪一下,让人看见“变了”
+function flashInput(el){if(!el)return;el.classList.remove("justset");void el.offsetWidth;el.classList.add("justset");
+  setTimeout(()=>el.classList.remove("justset"),900);}
 // 就地确认:保存成功后按钮变绿打勾 + 卡片描边一闪,比纯弹窗更明显
 function flashSaved(btn,label){
   if(!btn)return;
@@ -1514,27 +1512,57 @@ function flashSaved(btn,label){
   setTimeout(()=>{btn.classList.remove("btn-ok");btn.textContent=old;btn.disabled=false;delete btn.dataset.lbl0;},1600);
 }
 const _modelCache={};
-async function fillModels(pid,datalistId){
-  let models=_modelCache[pid];
-  if(!models){
-    try{const r=await (await fetch("/api/provider-models/"+pid)).json();models=r.models||[];}
-    catch(e){models=[];}
-    _modelCache[pid]=models;
-  }
-  const dl=$("#"+datalistId);if(dl)dl.innerHTML=models.map(m=>`<option value="${esc(m)}">`).join("");
-  return models;
+// 取某供应商的型号清单(配 key→实时 /models;否则内置常见型号)。缓存到内存,少打接口。
+async function fetchModels(pid){
+  if(_modelCache[pid])return _modelCache[pid];
+  let models=[];
+  try{const r=await (await fetch("/api/provider-models/"+pid)).json();models=r.models||[];}catch(e){}
+  _modelCache[pid]=models;return models;
 }
-function roleUseRec(key){
+// 用 models 重建某卡的型号下拉。selected 给定就选它(不在清单则补进去);否则保留当前/data-cur。
+// 永远附一个「＋ 自定义型号…」兜底,选它才显示文本框 —— 普通 <select> 不会像 datalist 那样被当前值过滤,
+// 所以 deepseek 的 flash 和 pro 会全部列出,不会只剩一个。
+function setModelOptions(key,models,selected){
+  const sel=$("#rcm-"+key);if(!sel)return;
+  const cur=(selected!=null&&selected!=="")?selected
+            :(sel.value&&sel.value!=="__custom__"?sel.value:(sel.dataset.cur||""));
+  const list=(models||[]).slice();
+  let html="";
+  if(cur&&!list.includes(cur))html+=`<option value="${esc(cur)}" selected>${esc(cur)}</option>`;  // 当前是自定义/历史型号也保住
+  html+=list.map(m=>`<option value="${esc(m)}"${m===cur?" selected":""}>${esc(m)}</option>`).join("");
+  if(!list.length&&!cur)html=`<option value="" selected>(选供应商 / 配 key 后出现型号)</option>`+html;
+  html+=`<option value="__custom__">＋ 自定义型号…</option>`;
+  sel.innerHTML=html;
+  sel.dataset.cur=cur;
+  rcModelSel(key);
+}
+// 选了「＋ 自定义型号…」就显示文本框,让人手填任意型号 ID
+function rcModelSel(key){
+  const sel=$("#rcm-"+key),c=$("#rcmc-"+key);if(!sel||!c)return;
+  const custom=sel.value==="__custom__";c.style.display=custom?"block":"none";if(custom)c.focus();
+}
+// 取这张卡最终的型号 ID(选了自定义就取文本框)
+function rcModelVal(key){
+  const sel=$("#rcm-"+key);if(!sel)return"";
+  return sel.value==="__custom__"?($("#rcmc-"+key)?.value||"").trim():sel.value;
+}
+// 按当前供应商给某卡填充型号下拉(保留 data-cur 当前型号)——初始渲染 / 配完 key 后刷新用
+async function populateModels(key){
+  const pid=$("#rcp-"+key)?.value;if(!pid)return;
+  setModelOptions(key,await fetchModels(pid),null);
+}
+async function roleUseRec(key){
   const rec=recs[key];if(!rec)return;
-  $("#rcm-"+key).value=rec.model;
   const pref=(rec.providers||[]).find(id=>provById(id)?.key_set)||rec.providers[0];
   if(pref)$("#rcp-"+key).value=pref;
   roleKeyRow(key);
+  setModelOptions(key,await fetchModels(pref),rec.model);   // 列出该厂商型号并选中推荐型号
+  flashInput($("#rcm-"+key));
   alert_("info","推荐",`${CALLSIGN[key]||key} → ${rec.model}(${rec.reason.slice(0,30)}…)`);
 }
 async function roleSave(key,btn){
-  const model=$("#rcm-"+key).value.trim(),pid=$("#rcp-"+key).value;
-  if(!model){alert_("err","CONFIG","请填模型 ID");return}
+  const model=rcModelVal(key),pid=$("#rcp-"+key).value;
+  if(!model){alert_("err","CONFIG","请选择或填写模型 ID");return}
   if(key==="__ceo__"){
     const r=await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({ceo_model:model,ceo_provider:pid})});
@@ -1563,8 +1591,11 @@ async function roleSaveKey(key,btn){
   if(!r.ok){alert_("err","PROVIDER","保存失败");return}
   alert_("info","PROVIDER",`${p.name} key 已保存,即时生效`);
   providers=await (await fetch("/api/providers")).json();
-  // 不整块重渲(那会抹掉按钮的就地确认);只就地刷新各卡 key 状态行
-  ["__ceo__",...agents.map(a=>a.name)].forEach(roleKeyRow);
+  delete _modelCache[pid];   // 该供应商缓存失效 —— 让内置兜底换成带 key 的实时列表
+  // 不整块重渲(那会抹掉按钮的就地确认);只就地刷新各卡 key 状态行 + 型号下拉
+  const allKeys=["__ceo__",...agents.map(a=>a.name)];
+  allKeys.forEach(roleKeyRow);
+  allKeys.forEach(populateModels);
   flashSaved(btn);
   loadProviders&&loadProviders();renderNoKeyBar();
 }

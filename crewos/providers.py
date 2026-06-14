@@ -141,6 +141,42 @@ RECOMMENDATIONS = {
                   "providers": ["ark"]},
 }
 
+# 每个供应商的常见型号 —— 内置兜底,无需 key 也能在看板下拉里看到/选择。
+# 配了 key 后,/api/provider-models 会改用该供应商实时 /models 的真实列表;只有
+# 实时列表取不到(没 key / 出错 / 空)时才回退到这份内置清单,保证下拉永不为空。
+KNOWN_MODELS = {
+    # —— agent 默认会用到的直连供应商(优先保证它们的下拉非空) ——
+    "deepseek": ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+    "zhipu": ["glm-5.1", "glm-5-air", "glm-5-flash", "glm-4-plus", "glm-4-flash"],
+    "dashscope": ["qwen3.7-max", "qwen3.7-plus", "qwen3.7-turbo", "qwen-max", "qwen-plus", "qwen-vl-max"],
+    "moonshot": ["kimi-k2.6", "kimi-k2", "moonshot-v1-128k", "moonshot-v1-32k", "moonshot-v1-8k"],
+    "openai": ["gpt-5.1", "gpt-5.1-mini", "codex-5.5", "o4", "o4-mini", "gpt-4.1"],
+    "ark": ["doubao-seed-2.0", "doubao-seed-2.0-lite", "doubao-pro-32k", "doubao-vision-pro", "doubao-lite-128k"],
+    "openrouter": ["deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-flash", "qwen/qwen3.7-max",
+                   "moonshotai/kimi-k2.6", "zhipu/glm-5.1", "openai/codex-5.5", "openai/gpt-5.1",
+                   "anthropic/claude-opus-4-8", "google/gemini-3-pro"],
+    # —— 其它常见直连 / 网关 ——
+    "anthropic": ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+    "gemini": ["gemini-3-pro", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
+    "xai": ["grok-4", "grok-4-mini", "grok-3"],
+    "mistral": ["mistral-large-2", "mistral-medium-3", "codestral-2", "mistral-small-3"],
+    "cohere": ["command-a", "command-r-plus", "command-r"],
+    "perplexity": ["sonar-pro", "sonar", "sonar-reasoning-pro"],
+    "groq": ["llama-4-70b", "llama-4-scout", "qwen3-32b", "deepseek-r1-distill-70b"],
+    "siliconflow": ["deepseek-ai/DeepSeek-V4", "Qwen/Qwen3.7-Max", "THUDM/GLM-5.1", "moonshotai/Kimi-K2.6"],
+    "minimax": ["minimax-m2", "abab7-chat", "minimax-vl-01"],
+    "stepfun": ["step-3", "step-2-16k", "step-1v-8k"],
+    "hunyuan": ["hunyuan-turbo-s", "hunyuan-large", "hunyuan-vision"],
+    "qianfan": ["ernie-5.0", "ernie-4.5-turbo", "ernie-speed"],
+    "lingyi": ["yi-large", "yi-lightning", "yi-vision"],
+    "baichuan": ["baichuan4-turbo", "baichuan4-air"],
+}
+
+
+def known_models(pid: str) -> list[str]:
+    """该供应商的内置常见型号清单(下拉兜底);未知供应商返回空列表。"""
+    return list(KNOWN_MODELS.get(pid, []))
+
 
 def _custom_path(root: str | Path) -> Path:
     return Path(root) / "config" / "providers.yaml"

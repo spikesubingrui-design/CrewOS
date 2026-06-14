@@ -37,6 +37,38 @@ def test_builtin_catalog_and_recommendations():
             assert pid in ids, f"{name} 推荐了不存在的供应商 {pid}"
 
 
+def test_known_models_seed_dropdown():
+    ids = {p["id"] for p in provcat.BUILTIN_PROVIDERS}
+    # KNOWN_MODELS 只指向真实供应商 id,且不重复、非空
+    for pid, models in provcat.KNOWN_MODELS.items():
+        assert pid in ids, f"KNOWN_MODELS 指向不存在的供应商 {pid}"
+        assert models and len(set(models)) == len(models), f"{pid} 型号清单空或有重复"
+    # DeepSeek 至少给出 flash 和 pro(用户明确要求两个都能选)
+    ds = provcat.known_models("deepseek")
+    assert "deepseek-v4-flash" in ds and "deepseek-v4-pro" in ds
+    # 每个 agent 的默认推荐渠道(首个供应商)都有内置兜底清单,保证下拉不空
+    for name, rec in provcat.RECOMMENDATIONS.items():
+        first = rec["providers"][0]
+        assert provcat.known_models(first), f"{name} 的默认供应商 {first} 没有内置型号兜底"
+    # 未知供应商安全返回空
+    assert provcat.known_models("does-not-exist") == []
+
+
+def test_provider_models_endpoint_falls_back_to_known(monkeypatch):
+    """没配 key 时 /api/provider-models 用内置清单兜底,下拉永不空。"""
+    from fastapi.testclient import TestClient
+    import crewos.web_server as ws
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch.setattr(ws, "ROOT", Path(d))
+        monkeypatch.delenv("ZHIPU_KEY", raising=False)
+        client = TestClient(ws.app)
+        r = client.get("/api/provider-models/zhipu")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["source"] == "known"
+        assert "glm-5.1" in body["models"]   # 没 key 也能在下拉里看到型号
+
+
 def test_load_and_add_custom_provider():
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)

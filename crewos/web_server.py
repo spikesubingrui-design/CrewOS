@@ -498,25 +498,31 @@ _models_cache: dict = {}
 
 @app.get("/api/provider-models/{pid}")
 def api_provider_models(pid: str):
-    """列出供应商的可用模型(GET /models),供前端下拉选择,少手输。缓存 5 分钟。"""
+    """列出供应商的可用模型,供前端下拉选择。配了 key 用实时 /models 真实列表;
+    取不到(没 key / 出错 / 空)就回退内置常见型号 KNOWN_MODELS,保证下拉永不为空。缓存 5 分钟。"""
     from . import providers as provcat
     from .router import list_models
     prov = provcat.get_provider(ROOT, pid)
     if not prov:
         return JSONResponse({"error": "unknown_provider"}, status_code=404)
+    curated = provcat.known_models(pid)
     key = os.environ.get(prov["key_env"], "")
     local = prov["endpoint"].startswith(("http://localhost", "http://127."))
     if not key and not local:
-        return {"models": [], "note": "需先配 key 才能拉取模型列表"}
+        # 没 key:给内置常见型号兜底,用户依然能在下拉里挑(配 key 后会换成实时列表)
+        note = "内置常见型号 · 配 key 后拉取该供应商实时列表" if curated else "需先配 key 才能拉取模型列表"
+        return {"models": curated, "source": "known", "note": note}
     cached = _models_cache.get(pid)
     if cached and time.time() - cached[0] < 300:
-        return {"models": cached[1]}
+        live = cached[1]
+        return {"models": live or curated, "source": "live" if live else "known"}
     try:
         models = list_models(prov["endpoint"], key)
         _models_cache[pid] = (time.time(), models)
-        return {"models": models}
+        return {"models": models or curated, "source": "live" if models else "known"}
     except Exception as e:
-        return {"models": [], "error": str(e)[:160]}
+        # 实时拉取失败也别让下拉空着 —— 回退内置清单
+        return {"models": curated, "source": "known", "error": str(e)[:160]}
 
 
 @app.get("/api/recommendations")

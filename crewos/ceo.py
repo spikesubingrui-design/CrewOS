@@ -59,29 +59,43 @@ def save_deliverable(root: str | Path, task_id: str, agent: str, content: str) -
 PLAN_SYSTEM = """你是 CrewOS 的总指挥(CEO)。你只决策、不亲自执行专业活,但你很聪明、有纪律。
 
 第一步:判断目标值不值得动用团队。
-- 寒暄 / 常识问答 / 简单算术 / 一句话就能回答的 → **你直接答**,别浪费 token——
-  输出 JSON 对象 {"direct": "你的回答"}。
-- 确实需要专业能力(写作/编码/研究/数据/行政/批量/视频理解)→ 拆解派单,输出 JSON 数组。
+- 寒暄 / 常识问答 / 简单算术 / 一句话能答的 → 你直接答,输出 JSON 对象:{"direct": "你的回答"}
+- 需要专业能力(写作/编码/研究/数据/行政/批量/视频理解)→ 拆解派单,输出 JSON 数组。
 
-拆解时,给每个派单写一条**高质量 instruction(单个字符串)**,必须含以下四段,缺一不可:
-1. 目标:这个子任务要达成什么(一句话)。
-2. 要求:关键约束(平台/字数/语言/技术栈/边界/明确不要做什么)。
-3. 验收标准:2-4 条**客观可判定**的成品标准(如「单文件 HTML 双击即运行」「含碰撞检测与重新开始」「字数≤300」),
-   这是成员产出要过的关,也是你最后验收的依据。
-4. 输出格式:产物形态(如「单个 ```html 代码块 + 一行 SUMMARY」)。
+agent 字段**只能是这七个值之一**(全小写英文、区分大小写):
+  coder(代码)、writer(中文创作)、researcher(研究/搜资料)、analyst(数据/计算)、
+  builder(行政/合同/邮件)、runner(批量/格式转换)、perceiver(视频/图像理解)。
+写错名字这一单会被直接丢弃,务必只用上面七个之一。
 
-派单规则:中文创作→writer,代码→coder,研究/搜资料→researcher,数据/计算→analyst,
-行政/合同/邮件→builder,批量/格式转换→runner,视频/图像理解→perceiver。
-简单专业目标派 1 个;复合目标拆 2-4 个**互相独立、可并行**的子任务,别把一件事拆成依赖链。
-只输出 JSON(对象或数组),不要任何额外文字,不要用 markdown 代码块包裹 JSON。"""
+每条 instruction 是单个字符串,必须**逐字包含这四个段标题**(标题不得改写、不得省略):
+【目标】一句话说清要达成什么。
+【要求】关键约束(平台/字数/语言/技术栈/边界/明确不要做什么)。
+【验收标准】2-4 条客观可判定的成品标准(成员据此自查、你据此验收)。
+【输出格式】产物形态。
 
-REVIEW_SYSTEM = """你是 CrewOS 总指挥,现在做**交付验收**(不是夸产物)。
+简单专业目标派 1 个;复合目标拆 2-4 个**互相独立、可并行**的子任务,别拆成依赖链。
+
+输出规则:**只输出 JSON 本身**,不要任何前后文字,不要用 ``` 代码块包裹 JSON。照下面两种格式之一:
+
+简单任务直接答:
+{"direct": "你的回答"}
+
+工作任务派单(数组,每元素一个派单):
+[{"agent":"coder","instruction":"【目标】用单文件 HTML 做贪吃蛇。【要求】纯前端零依赖、方向键控制。【验收标准】1.双击即玩;2.含计分与游戏结束重开;3.全部代码在一个 .html。【输出格式】单个 ```html 代码块 + 结尾一行 SUMMARY。"}]"""
+
+REVIEW_SYSTEM = """你是 CrewOS 总指挥,现在做交付验收(不是夸产物)。
 给你:原始目标、各成员产出预览、机器检查结果(checks)。
-逐项对照「目标与各自的验收标准」严格判断,用中文输出:
+
+判定规则(必须遵守):
+- check_failures 非空 → 结论只能是 ⚠️ 或 ❌;在「缺口」里逐条引用失败项,点名是谁、改哪条验收标准;禁止给 ✅。
+- check_failures 为空但产出缺失/明显不满足验收标准 → 同样标 ❌ 并说明原因。
+- 只有产出齐全且满足各自验收标准 → 才可 ✅。
+
+用中文输出 2-5 句:
 1. 结论:✅ 达成 / ⚠️ 部分达成 / ❌ 未达成。
-2. 逐成员:产出是否满足其验收标准;机器检查是否标红(check_failures 非空即标红)。
-3. 缺口:还差什么(具体、可执行);若需返工,点名是谁、改哪里。
-2-5 句,直说结论,不要复述产物内容。"""
+2. 逐成员:是否满足其验收标准 + 机器检查是否标红。
+3. 缺口:还差什么(具体、可执行);需返工就点名谁、改哪里。
+直说结论,不复述产物内容。"""
 
 
 def _roster_desc(router) -> str:
@@ -111,18 +125,27 @@ def parse_direct(text: str) -> str | None:
 
 
 def parse_plan(text: str, valid_agents: list[str]) -> list[dict]:
-    """从 CEO 产出里抽出派单计划。容错:剥代码块、找数组、校验 agent 名。"""
+    """从 CEO 产出里抽出派单计划。容错:剥代码块、找数组、单对象当 1 单、校验 agent 名。"""
     body = text.strip()
     m = re.search(r"```(?:json)?\s*(.+?)```", body, re.DOTALL)
     if m:
         body = m.group(1).strip()
-    m = re.search(r"\[.*\]", body, re.DOTALL)
+    arr = None
+    m = re.search(r"\[.*\]", body, re.DOTALL)   # 优先找数组
     if m:
-        body = m.group(0)
-    try:
-        arr = json.loads(body)
-    except (ValueError, TypeError):
-        return []
+        try:
+            arr = json.loads(m.group(0))
+        except (ValueError, TypeError):
+            arr = None
+    if arr is None:                              # 便宜模型常把单个派单写成裸对象 {agent,instruction}
+        m = re.search(r"\{.*\}", body, re.DOTALL)
+        if m:
+            try:
+                obj = json.loads(m.group(0))
+                if isinstance(obj, dict) and obj.get("agent"):
+                    arr = [obj]
+            except (ValueError, TypeError):
+                arr = None
     if not isinstance(arr, list):
         return []
     out = []
@@ -163,7 +186,7 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
             ch, ceo_model,
             [{"role": "system", "content": PLAN_SYSTEM},
              {"role": "user", "content": plan_user}],
-            temperature, 1500)
+            temperature, 2500)   # 给推理模型留足额度,4 单全段 JSON 不会被截断
         # 简单任务:CEO 直接答,不动用任何 agent
         direct = parse_direct(plan_resp["content"])
         if direct:
@@ -181,8 +204,11 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
     degraded = not plan
     if degraded:                       # 解析不出计划(如 mock/弱模型)→ 兜底派给一个 agent
         plan = [{"agent": fallback_agent, "instruction": goal}]
+        # 记录 CEO 实际产出的原文(截断),便于排查到底是哪种格式没被解析出来
+        raw = (plan_resp.get("content") or "")[:300] if isinstance(plan_resp, dict) else ""
         led.log(task_id, "review_feedback", "ceo", fallback_agent, payload={
-            "summary": "未能解析出多步计划,降级为单点派单(配强 CEO 模型可获得真正拆解)"})
+            "summary": "未能解析出多步计划,降级为单点派单(配强 CEO 模型可获得真正拆解)",
+            "raw_plan": raw})
 
     led.log(task_id, "status_update", "ceo", payload={
         "summary": f"CEO 已规划 {len(plan)} 个派单:" + "、".join(p["agent"] for p in plan)})

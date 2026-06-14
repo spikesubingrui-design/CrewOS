@@ -43,6 +43,14 @@ def test_parse_plan_variants():
     # 非 JSON → 空
     assert parse_plan("我觉得应该让 writer 去做", valid) == []
     assert parse_plan("", valid) == []
+    # v0.14.1 容错:便宜模型把单个派单写成裸对象(非数组)→ 当 1 单解析
+    assert parse_plan('{"agent":"coder","instruction":"写函数"}', valid) == \
+        [{"agent": "coder", "instruction": "写函数"}]
+    # 裸对象 + ```json 包裹 + 前导句
+    assert parse_plan('好的:\n```json\n{"agent":"writer","instruction":"写"}\n```', valid) == \
+        [{"agent": "writer", "instruction": "写"}]
+    # 单对象但 agent 非法 → 空
+    assert parse_plan('{"agent":"ghost","instruction":"x"}', valid) == []
 
 
 def test_orchestrate_degrades_on_mock():

@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from crewos.ceo import orchestrate, parse_clarify, parse_plan
+from crewos.ceo import orchestrate, parse_clarify, parse_plan, trim_context
 from crewos.ledger import Ledger
 from crewos.router import Router
 
@@ -69,6 +69,19 @@ def test_parse_clarify_and_estimate():
         assert abs(e["worst_usd"] - 0.0021) < 1e-9
         assert e["model"] == "mock-model" and e["cap_usd"] == 2.0
         assert e["est_in_tok"] == 100 and e["max_out_tok"] == 1000
+
+
+def test_trim_context():
+    # 改动5:上下文裁剪 —— 短的原样返回;长的只保留与 query 相关的段
+    short = "就这一段经验"
+    assert trim_context(short, "任何") == short
+    blocks = ["无关内容甲 " + "x" * 400,
+              "关于 小红书 文案 的经验沉淀 " + "y" * 400,
+              "另一段无关乙 " + "z" * 400]
+    out = trim_context("\n\n".join(blocks), "小红书 文案", max_chars=600)
+    assert "小红书" in out                       # 相关段被保留
+    assert "无关内容甲" not in out and "另一段无关乙" not in out   # 无关段被裁掉
+    assert len(out) <= 700
 
 
 def test_orchestrate_clarifies_on_vague_goal(monkeypatch):

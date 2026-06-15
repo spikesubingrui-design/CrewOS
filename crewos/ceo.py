@@ -132,6 +132,32 @@ def parse_direct(text: str) -> str | None:
     return str(d).strip() if d else None
 
 
+def trim_context(context: str, query: str, max_chars: int = 1500) -> str:
+    """把要喂给某个执行手的上下文裁到与其任务最相关的片段,省 context 税
+    (对标 Claude Code 的 MCP Tool Search 延迟加载思路:别把整坨上下文塞给每个便宜模型)。
+    上下文本就短(≤max_chars)→ 原样返回;否则按与 query 的关键词重叠给段落打分,
+    保留最相关的若干段(再按原文顺序拼回),无重叠时退化为按预算截断。"""
+    ctx = (context or "").strip()
+    if len(ctx) <= max_chars:
+        return ctx
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", ctx) if b.strip()]
+    terms = set(re.findall(r"[\w一-鿿]{2,}", (query or "").lower()))
+
+    def score(b: str) -> int:
+        bl = b.lower()
+        return sum(1 for t in terms if t in bl)
+
+    ranked = sorted(range(len(blocks)), key=lambda i: score(blocks[i]), reverse=True)
+    keep, used = [], 0
+    for i in ranked:
+        b = blocks[i]
+        if used + len(b) > max_chars and keep:
+            break
+        keep.append(i)
+        used += len(b) + 2
+    return "\n\n".join(blocks[i] for i in sorted(keep))
+
+
 def parse_clarify(text: str) -> str | None:
     """CEO 判定目标太含糊时返回 {"clarify": "..."};解析出澄清问题则返回它。"""
     body = text.strip()
@@ -265,7 +291,9 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
     deliverables = []          # [(agent, [相对路径...])]
     for step in plan:
         try:
-            r = router.dispatch(step["agent"], step["instruction"], context=u_ctx,
+            # 上下文裁剪:只把与本步任务相关的 U 记忆片段喂给该执行手,省 context 税
+            step_ctx = trim_context(u_ctx, step["instruction"]) if u_ctx else ""
+            r = router.dispatch(step["agent"], step["instruction"], context=step_ctx,
                                 task_id=task_id, max_tokens=step_max_tokens)
             content = r.get("content", "") or ""
             if r.get("empty") or not content.strip():     # 空产出:把原因如实带给汇总,别假装成功

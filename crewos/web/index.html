@@ -552,6 +552,12 @@ input[type=password]:focus{border-color:var(--blue)}
             <textarea id="s-blocklist"></textarea></div>
           <div class="frow"><label class="micro">飞书机器人 webhook(交付/上报/审批推送)</label>
             <input type="text" id="s-feishu" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" style="width:100%"></div>
+          <div class="frow"><label class="micro">飞书机器人签名密钥(可选,开了「加签」才填)</label>
+            <input type="text" id="s-feishu-secret" placeholder="留空 = 不加签" style="width:100%"></div>
+          <div class="frow"><label class="micro">企业微信 群机器人 webhook(微信侧推送)</label>
+            <input type="text" id="s-wecom" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…" style="width:100%"></div>
+          <div class="frow"><label class="micro">Discord Webhook(海外/社区推送)</label>
+            <input type="text" id="s-discord" placeholder="https://discord.com/api/webhooks/…" style="width:100%"></div>
           <div class="frow"><label class="micro">通用 webhook(可选,POST JSON)</label>
             <input type="text" id="s-webhook" placeholder="https://…" style="width:100%"></div>
           <div class="frow"><label class="micro">Access Token(局域网/隧道访问必配,留空关闭)</label>
@@ -1378,6 +1384,8 @@ async function loadSettings(){
   $("#s-cny").value=CNY;
   $("#s-budget").value=r2(s.default_task_budget_usd);$("#s-warn").value=r2(s.monthly_warn_usd);
   $("#s-feishu").value=s.feishu_webhook||"";$("#s-webhook").value=s.webhook_url||"";
+  $("#s-feishu-secret").value=s.feishu_secret||"";$("#s-wecom").value=s.wecom_webhook||"";
+  $("#s-discord").value=s.discord_webhook||"";
   $("#s-token").value=s.dashboard_token||"";
   // CEO 供应商下拉(分组)+ 当前值
   const ceoSel=$("#s-ceo-provider");
@@ -1404,7 +1412,9 @@ async function saveSettings(btn){
   await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({default_task_budget_usd:toUsd($("#s-budget").value),
       monthly_warn_usd:toUsd($("#s-warn").value),cny_rate:rate,
-      feishu_webhook:$("#s-feishu").value.trim(),webhook_url:$("#s-webhook").value.trim(),
+      feishu_webhook:$("#s-feishu").value.trim(),feishu_secret:$("#s-feishu-secret").value.trim(),
+      wecom_webhook:$("#s-wecom").value.trim(),discord_webhook:$("#s-discord").value.trim(),
+      webhook_url:$("#s-webhook").value.trim(),
       dashboard_token:token})});
   if(token)document.cookie="crewos_token="+encodeURIComponent(token)+"; SameSite=Strict";
   await fetch("/api/file",{method:"PUT",headers:{"Content-Type":"application/json"},

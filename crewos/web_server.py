@@ -49,7 +49,8 @@ EDITABLE = re.compile(
 def _settings() -> dict:
     f = ROOT / "config" / "settings.yaml"
     base = {"default_task_budget_usd": 2.0, "monthly_warn_usd": 120.0,
-            "feishu_webhook": "", "webhook_url": "", "dashboard_token": "",
+            "feishu_webhook": "", "feishu_secret": "", "wecom_webhook": "",
+            "discord_webhook": "", "webhook_url": "", "dashboard_token": "",
             "watchdog_suspicious_minutes": 5.0, "watchdog_critical_minutes": 15.0,
             "monthly_hard_usd": 0.0, "ceo_model": "", "ceo_provider": "",
             "cny_rate": 7.2}
@@ -630,7 +631,8 @@ def api_put_settings(body: dict):
     cur = _settings()
     cur.update({k: v for k, v in body.items()
                 if k in ("default_task_budget_usd", "monthly_warn_usd",
-                         "feishu_webhook", "webhook_url", "dashboard_token",
+                         "feishu_webhook", "feishu_secret", "wecom_webhook",
+                         "discord_webhook", "webhook_url", "dashboard_token",
                          "monthly_hard_usd", "watchdog_suspicious_minutes",
                          "watchdog_critical_minutes", "ceo_model", "ceo_provider",
                          "cny_rate",

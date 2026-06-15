@@ -91,6 +91,47 @@ def test_notify_compose_filters():
     assert "crewos approve abc123" in text and "L4" in text
 
 
+def test_notify_platform_bodies():
+    """各平台出站载荷契约:飞书加签 / 企业微信 text / Discord content。"""
+    import base64
+    import hashlib
+    import hmac
+
+    from crewos.notify import (_feishu_sign, discord_body, feishu_body,
+                               wecom_body)
+    # 飞书:不加签只有 msg_type/content;加签追加 timestamp+sign 且签名可复算
+    plain = feishu_body("hi")
+    assert plain == {"msg_type": "text", "content": {"text": "hi"}}
+    signed = feishu_body("hi", "SEC")
+    assert signed["sign"] and signed["timestamp"]
+    expect = base64.b64encode(hmac.new(
+        f"{signed['timestamp']}\nSEC".encode(), b"", hashlib.sha256).digest()).decode()
+    assert signed["sign"] == expect == _feishu_sign("SEC", signed["timestamp"])
+    # 企业微信:msgtype=text,内容截断 2000
+    wb = wecom_body("x" * 3000)
+    assert wb["msgtype"] == "text" and len(wb["text"]["content"]) == 2000
+    # Discord:content 截到 1900
+    db = discord_body("y" * 3000)
+    assert len(db["content"]) == 1900
+
+
+def test_notify_push_routes_to_all_channels(monkeypatch):
+    """push 把同一条事件分发到所有已配置通道(飞书/企业微信/Discord/通用);未配置的不发。"""
+    from crewos import notify
+    sent = []
+    monkeypatch.setattr(notify, "_post_json", lambda url, body, timeout=5: sent.append((url, body)))
+    ev = {"type": "task_done", "from_agent": "ceo", "to_agent": "user",
+          "task_id": "t9", "payload": json.dumps({"summary": "完成"}), "cost_usd": 0.01}
+    notify.push({"feishu_webhook": "https://feishu/x", "wecom_webhook": "https://qyapi/x",
+                 "discord_webhook": "https://discord/x", "webhook_url": "https://generic/x"}, ev)
+    urls = [u for u, _ in sent]
+    assert urls == ["https://feishu/x", "https://qyapi/x", "https://discord/x", "https://generic/x"]
+    # 一个都没配 → 不发
+    sent.clear()
+    notify.push({}, ev)
+    assert sent == []
+
+
 # ---------- Memory Tree ----------
 
 def test_vault_roundtrip_and_search():

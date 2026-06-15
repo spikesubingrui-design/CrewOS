@@ -54,7 +54,7 @@ def cmd_onboard(args):
         write_env(ws, keys)
         print(f"▸ 已写入 {ws / '.env'}(权限 600)")
 
-    print(f"""
+    print("""
 ✓ 就绪。下一步:
 
   crewos start                          # 打开 Mission Control

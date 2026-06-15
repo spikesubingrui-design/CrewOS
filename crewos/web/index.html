@@ -264,8 +264,6 @@ input.justset,select.justset{animation:inset 0.9s ease-out}
 /* 供应商面板 */
 .provcard{background:rgba(79,124,255,.06);border:1px solid var(--line-strong);border-radius:3px;
   padding:13px 15px;margin-top:6px}
-.provrow{padding:12px 0;border-bottom:1px solid var(--line)}
-.provrow:last-child{border-bottom:none}
 .provhd{display:flex;align-items:center;gap:8px;font-size:12px}
 .provhd b{font-weight:600;letter-spacing:.03em}
 .provhd a{color:var(--ice);text-decoration:none}.provhd a:hover{text-decoration:underline}
@@ -738,12 +736,6 @@ const I18N={
   tx_btn:{zh:"发送 ▸",en:"TRANSMIT ▸"},
   ceo_opt:{zh:"▸ CDR · CEO 自动编排",en:"▸ CDR · CEO auto-orchestrate"},
   ceo_started:{zh:"已交给 CEO 编排,看板直播中",en:"Handed to CEO — orchestrating, watch the board"},
-  ceo_panel:{zh:"总指挥 / CEO 自动编排",en:"Commander / CEO auto-orchestrate"},
-  ceo_note:{zh:"TRANSMIT 选「CDR·CEO 自动编排」时,用这里配的模型对目标做规划→派单→汇总。推荐选强推理模型(如 deepseek-v4-pro / claude / gpt)。",
-            en:"When you pick «CDR·CEO» in TRANSMIT, this model plans → dispatches → summarizes your goal. Pick a strong reasoning model (e.g. deepseek-v4-pro / claude / gpt)."},
-  ceo_provider:{zh:"CEO 供应商",en:"CEO provider"},
-  ceo_model:{zh:"CEO 模型 ID",en:"CEO model ID"},
-  ceo_commit:{zh:"保存总指挥",en:"COMMIT CEO"},
   fuel:{zh:"预算 / Fuel Limits",en:"Fuel Limits"},
   budget_task:{zh:"单任务燃料上限 USD — 超限自动熔断",en:"Per-task budget USD — auto cutoff over limit"},
   budget_warn:{zh:"月度警戒线 USD",en:"Monthly warn line USD"},
@@ -1389,23 +1381,8 @@ async function loadSettings(){
   $("#s-feishu-secret").value=s.feishu_secret||"";$("#s-wecom").value=s.wecom_webhook||"";
   $("#s-discord").value=s.discord_webhook||"";$("#s-tavily").value=s.tavily_key||"";
   $("#s-token").value=s.dashboard_token||"";
-  // CEO 供应商下拉(分组)+ 当前值
-  const ceoSel=$("#s-ceo-provider");
-  if(ceoSel){
-    const groups={};for(const p of providers)(groups[p.group||"其他"]=groups[p.group||"其他"]||[]).push(p);
-    ceoSel.innerHTML=`<option value="">(选择供应商)</option>`+
-      Object.entries(groups).map(([g,ps])=>`<optgroup label="${g}">`+
-        ps.map(p=>`<option value="${p.id}">${p.key_set?'✓ ':''}${esc(p.name)}</option>`).join("")+`</optgroup>`).join("");
-    ceoSel.value=s.ceo_provider||"";$("#s-ceo-model").value=s.ceo_model||"";
-  }
   const bl=await (await fetch("/api/file?path=config/dlp_blocklist.txt")).json();
   if(bl.content!==undefined)$("#s-blocklist").value=bl.content;
-}
-async function saveCeo(){
-  const r=await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({ceo_provider:$("#s-ceo-provider").value,ceo_model:$("#s-ceo-model").value.trim()})});
-  $("#s-ceo-status").textContent=r.ok?"已保存":"失败";
-  if(r.ok)alert_("info","CEO","总指挥模型已设置 — TRANSMIT 选 CDR·CEO 即可自动编排");
 }
 async function saveSettings(btn){
   const token=$("#s-token").value.trim();

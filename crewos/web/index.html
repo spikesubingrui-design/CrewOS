@@ -107,6 +107,17 @@ nav{display:flex;gap:4px;height:100%}
 .node .tk{font-size:9px;color:var(--green);margin-top:3px;max-width:120px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;opacity:0;transition:.3s}
 .node.engaged .tk{opacity:1}
+/* #3 未配置 key 的成员 → 暗态(无法真实派单),配上 key 自动点亮 */
+.node{transition:opacity .45s,filter .45s}
+.node.unconfigured{opacity:.34;filter:grayscale(.75)}
+.node.unconfigured .core{background:#161d30;border-color:#2b3550;box-shadow:none}
+.node.unconfigured .cs{color:var(--dim)}
+.crew-row{transition:opacity .45s}
+.crew-row.unconfigured{opacity:.5}
+.crew-row.unconfigured .lamp{background:#2b3550;box-shadow:none;animation:none}
+/* #3 任务执行中 → 只亮被派到的成员,其余淡出聚焦 */
+.node.mission-dim{opacity:.14;filter:grayscale(.6)}
+.crew-row.mission-dim{opacity:.3}
 #cmd-node{position:absolute;z-index:4;transform:translate(-50%,-50%);text-align:center;width:160px}
 #cmd-node .core{width:34px;height:34px;margin:0 auto;border-radius:50%;
   background:radial-gradient(circle at 35% 35%,#2a3c6e,#0d1426);border:1.5px solid var(--ice);
@@ -1058,13 +1069,35 @@ function applyCrewVisuals(){
   for(const a of agents){
     const node=$("#node-"+a.name);if(!node)continue;
     const core=node.querySelector(".core"),col=colorOf(a.name),cs=node.querySelector(".cs");
+    // #3 未配置 key → 暗态:无法真实派单,提示去配置
+    const configured=(a.channels||[]).some(c=>c.key_set);
+    node.classList.toggle("unconfigured",!configured);
+    $("#crew-"+a.name)?.classList.toggle("unconfigured",!configured);
     node.style.setProperty("--agent",col);   // 经 CSS 变量上色,engaged/offline 状态仍可覆盖
-    if(cs)cs.style.color=col;
+    if(cs)cs.style.color=configured?col:"";   // 未配置 → 交回 CSS 用 dim 色
+    const st=$("#mst-"+a.name);
+    if(st&&!configured)st.textContent=LANG==="zh"?"未配置":"NO KEY";
     // 尺寸:均匀=14px;否则 11–30px 按 metric 占比
     const v=(crewUsage[a.name]||{})[metric]||0;
     const sz=metric==="uniform"?14:Math.round(11+(v/max)*19);
     core.style.width=sz+"px";core.style.height=sz+"px";
   }
+  applyMissionFocus();
+}
+/* #3 任务执行聚焦:只亮被派到的成员,其余淡出;无活动 45s 或任务完成后解除 */
+let missionActive=new Set(),missionIdle=null;
+function missionTouch(){if(missionIdle)clearTimeout(missionIdle);
+  missionIdle=setTimeout(()=>{missionActive.clear();applyMissionFocus();},45000);}
+function endMissionSoon(){if(missionIdle)clearTimeout(missionIdle);
+  missionIdle=setTimeout(()=>{missionActive.clear();applyMissionFocus();},3500);}
+function applyMissionFocus(){
+  const on=missionActive.size>0;
+  for(const a of agents){
+    const dim=on&&!missionActive.has(a.name);
+    $("#node-"+a.name)?.classList.toggle("mission-dim",dim);
+    $("#crew-"+a.name)?.classList.toggle("mission-dim",dim);
+  }
+  $("#orbitfield")?.classList.toggle("mission-on",on);
 }
 
 /* ════════ 光脉冲传输 ════════ */
@@ -1114,18 +1147,21 @@ function handleEvent(ev){
   switch(ev.type){
     case "task_assign":
       pulse("ceo",ev.to_agent);setCrew(ev.to_agent,"engaged",brief);
+      missionActive.add(ev.to_agent);missionTouch();applyMissionFocus();   // 聚焦被派到的成员
       $("#cmd-status").textContent="UPLINK → "+(CALLSIGN[ev.to_agent]||ev.to_agent);break;
     case "task_result":
       pulse(ev.from_agent,"ceo",true);setCrew(ev.from_agent,null,"");
+      missionTouch();                                                       // 任务仍在跑,保持聚焦
       $("#cmd-node").classList.add("reviewing");
       $("#cmd-status").textContent="REVIEWING · ROUND "+ev.round;
       setTimeout(()=>$("#cmd-node").classList.remove("reviewing"),2600);break;
     case "review_feedback":
       pulse("ceo",ev.to_agent);alert_("warn","REVIEW",CALLSIGN[ev.to_agent]+" ← "+brief);break;
     case "task_done":
-      $("#cmd-status").textContent="MISSION COMPLETE";alert_("info","LANDED",brief);break;
+      $("#cmd-status").textContent="MISSION COMPLETE";alert_("info","LANDED",brief);
+      endMissionSoon();break;                                              // 任务收官 → 解除聚焦
     case "retrospect":$("#cmd-status").textContent="DEBRIEF / RETROSPECT";break;
-    case "escalation":alert_("err","ESCALATION",brief);break;
+    case "escalation":alert_("err","ESCALATION",brief);endMissionSoon();break;
     case "dlp_block":alert_("err","DLP INTERCEPT",brief);break;
     case "budget_block":alert_("err","FUEL CUTOFF",brief);break;
     case "failover":alert_("warn","CHANNEL SWITCH",brief);break;

@@ -132,6 +132,46 @@ def test_notify_push_routes_to_all_channels(monkeypatch):
     assert sent == []
 
 
+# ---------- 选型/调研(Tavily 先调研开源) ----------
+
+def test_research_looks_buildish():
+    from crewos.research import looks_buildish
+    assert looks_buildish("帮我做一个马里奥游戏")
+    assert looks_buildish("搭建一个幼儿园 ERP 小程序")
+    assert looks_buildish("build a landing page")
+    # 纯写作/研究/寒暄不触发调研
+    assert not looks_buildish("写一篇小红书文案")
+    assert not looks_buildish("你好啊")
+    assert not looks_buildish("分析这份销售数据")
+
+
+def test_research_oss_degrades_without_network():
+    from crewos.research import research_oss
+    # 非建造类 → 直接空,连 key 都不取
+    r = research_oss("写一首诗", {"tavily_key": "tvly-fake"})
+    assert r["findings"] == [] and r["reason"] == "non_build"
+
+
+def test_research_oss_formats_and_injects(monkeypatch):
+    """建造类目标 + 有 key + 有结果 → 产出可注入 CEO 规划的二开指引文本。"""
+    from crewos import research
+    monkeypatch.setattr(research, "load_key", lambda s=None: "tvly-fake")
+    monkeypatch.setattr(research, "tavily_search", lambda q, k, max_results=5: [
+        {"title": "supermario.js", "url": "https://github.com/x/mario",
+         "content": "Canvas 实现的马里奥,开箱即用"},
+        {"title": "无 url 的会被丢弃", "url": "", "content": "skip me"},
+    ])
+    r = research.research_oss("做一个马里奥游戏", {})
+    assert len(r["findings"]) == 1 and r["findings"][0]["url"] == "https://github.com/x/mario"
+    assert "优先" in r["text"] and "github.com/x/mario" in r["text"]
+    assert "禁止" in r["text"] and "从零造轮子" in r["text"]
+    # 检索抛错 → 安静降级
+    monkeypatch.setattr(research, "tavily_search",
+                        lambda q, k, max_results=5: (_ for _ in ()).throw(RuntimeError("boom")))
+    r2 = research.research_oss("做一个马里奥游戏", {})
+    assert r2["findings"] == [] and r2["reason"].startswith("error")
+
+
 # ---------- Memory Tree ----------
 
 def test_vault_roundtrip_and_search():

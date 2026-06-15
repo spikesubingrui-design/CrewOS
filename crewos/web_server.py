@@ -53,7 +53,7 @@ def _settings() -> dict:
             "discord_webhook": "", "webhook_url": "", "dashboard_token": "",
             "watchdog_suspicious_minutes": 5.0, "watchdog_critical_minutes": 15.0,
             "monthly_hard_usd": 0.0, "ceo_model": "", "ceo_provider": "",
-            "cny_rate": 7.2}
+            "cny_rate": 7.2, "tavily_key": ""}
     if f.exists():
         base.update(yaml.safe_load(f.read_text(encoding="utf-8")) or {})
     return base
@@ -635,7 +635,7 @@ def api_put_settings(body: dict):
                          "discord_webhook", "webhook_url", "dashboard_token",
                          "monthly_hard_usd", "watchdog_suspicious_minutes",
                          "watchdog_critical_minutes", "ceo_model", "ceo_provider",
-                         "cny_rate",
+                         "cny_rate", "tavily_key",
                          "u_memory_enabled", "u_hot_dir", "u_wiki_dir")})
     # 注意:u_gbrain_bin / u_gbrain_path(被执行的二进制)故意不在 API 可写白名单内 ——
     # 只能改 settings.yaml(已等于有文件系统权限),避免经联网端点注入任意可执行文件。

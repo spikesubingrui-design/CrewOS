@@ -75,6 +75,9 @@ agent 字段**只能是这七个值之一**(全小写英文、区分大小写):
 
 简单专业目标派 1 个;复合目标拆 2-4 个**互相独立、可并行**的子任务,别拆成依赖链。
 
+做软件 / 产品 / 工具类目标时,**优先基于成熟开源项目或模板做二次开发,而不是从零造轮子**;
+若用户消息里附了【调研结果】,务必在 instruction 的【要求】里点名参照哪个仓库/URL 改造。
+
 输出规则:**只输出 JSON 本身**,不要任何前后文字,不要用 ``` 代码块包裹 JSON。照下面两种格式之一:
 
 简单任务直接答:
@@ -177,11 +180,26 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
         led.log(task_id, "status_update", "ceo", payload={
             "summary": "已从 U 第二大脑召回相关记忆,注入本次规划与派单"})
 
+    # 0.5) 选型/调研:建造类目标先用 Tavily 实时检索成熟开源/模板,优先二开而非从零造轮子
+    research_block = ""
+    try:
+        from . import research
+        rr = research.research_oss(goal, settings)
+        research_block = rr.get("text") or ""
+        if rr.get("findings"):
+            led.log(task_id, "status_update", "ceo", payload={
+                "summary": f"已调研 {len(rr['findings'])} 个开源/模板候选,将据此优先二次开发",
+                "candidates": [f["url"] for f in rr["findings"]]})
+    except Exception:
+        research_block = ""    # 调研永不阻断编排
+
     # 1) 规划
     try:
         plan_user = f"目标:{goal}\n\n团队名册:\n{_roster_desc(router)}"
         if u_ctx:
             plan_user += "\n\n" + u_ctx
+        if research_block:
+            plan_user += "\n\n" + research_block
         plan_resp = _call_openai_compatible(
             ch, ceo_model,
             [{"role": "system", "content": PLAN_SYSTEM},

@@ -558,6 +558,8 @@ input[type=password]:focus{border-color:var(--blue)}
             <input type="text" id="s-wecom" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…" style="width:100%"></div>
           <div class="frow"><label class="micro">Discord Webhook(海外/社区推送)</label>
             <input type="text" id="s-discord" placeholder="https://discord.com/api/webhooks/…" style="width:100%"></div>
+          <div class="frow"><label class="micro">Tavily API Key — CEO 派单前先调研成熟开源/模板(留空=自动读环境变量/hermes)</label>
+            <input type="text" id="s-tavily" placeholder="tvly-… 建造类任务会先搜现成方案优先二开" style="width:100%"></div>
           <div class="frow"><label class="micro">通用 webhook(可选,POST JSON)</label>
             <input type="text" id="s-webhook" placeholder="https://…" style="width:100%"></div>
           <div class="frow"><label class="micro">Access Token(局域网/隧道访问必配,留空关闭)</label>
@@ -1385,7 +1387,7 @@ async function loadSettings(){
   $("#s-budget").value=r2(s.default_task_budget_usd);$("#s-warn").value=r2(s.monthly_warn_usd);
   $("#s-feishu").value=s.feishu_webhook||"";$("#s-webhook").value=s.webhook_url||"";
   $("#s-feishu-secret").value=s.feishu_secret||"";$("#s-wecom").value=s.wecom_webhook||"";
-  $("#s-discord").value=s.discord_webhook||"";
+  $("#s-discord").value=s.discord_webhook||"";$("#s-tavily").value=s.tavily_key||"";
   $("#s-token").value=s.dashboard_token||"";
   // CEO 供应商下拉(分组)+ 当前值
   const ceoSel=$("#s-ceo-provider");
@@ -1414,7 +1416,7 @@ async function saveSettings(btn){
       monthly_warn_usd:toUsd($("#s-warn").value),cny_rate:rate,
       feishu_webhook:$("#s-feishu").value.trim(),feishu_secret:$("#s-feishu-secret").value.trim(),
       wecom_webhook:$("#s-wecom").value.trim(),discord_webhook:$("#s-discord").value.trim(),
-      webhook_url:$("#s-webhook").value.trim(),
+      webhook_url:$("#s-webhook").value.trim(),tavily_key:$("#s-tavily").value.trim(),
       dashboard_token:token})});
   if(token)document.cookie="crewos_token="+encodeURIComponent(token)+"; SameSite=Strict";
   await fetch("/api/file",{method:"PUT",headers:{"Content-Type":"application/json"},

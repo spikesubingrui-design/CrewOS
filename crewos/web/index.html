@@ -39,9 +39,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
   margin-left:12px;vertical-align:1px}
 nav{display:flex;gap:4px;height:100%}
 .tab{display:flex;align-items:center;padding:0 18px;cursor:pointer;color:var(--dim);
-  font-size:10.5px;letter-spacing:.28em;border-bottom:2px solid transparent;transition:.2s;user-select:none}
+  font-size:10.5px;letter-spacing:.28em;transition:.2s;user-select:none;
+  background:none;border:none;border-bottom:2px solid transparent;font-family:inherit;height:100%}
 .tab:hover{color:var(--text)}
 .tab.active{color:var(--ice);border-bottom-color:var(--blue)}
+/* 键盘可达性:Tab 聚焦时给清晰焦点环(导航标签 + 可折叠面板头) */
+.tab:focus-visible,.panel-h[role="button"]:focus-visible{outline:2px solid var(--blue);outline-offset:-2px;color:var(--text)}
+.panel-h[role="button"]{cursor:pointer}
 #topbar .grow{flex:1}
 .clockbox{text-align:right;line-height:1.5}
 .clockbox b{font-weight:600;font-size:13.5px;color:var(--text);display:block;font-variant-numeric:tabular-nums}
@@ -166,6 +170,14 @@ select:focus,input:focus,textarea:focus{border-color:var(--blue)}
 .mop:hover{color:var(--red)}
 
 /* ───── FLIGHT RECORDER ───── */
+#ask{display:none;position:fixed;inset:0;background:rgba(2,4,9,.86);z-index:120;backdrop-filter:blur(4px);
+  align-items:center;justify-content:center;animation:adrop .2s}
+#ask.open{display:flex}
+#ask-box{background:var(--panel-solid);border:1px solid var(--line-strong);border-radius:5px;
+  padding:22px 24px;width:min(440px,92vw);box-shadow:0 18px 60px rgba(0,0,0,.55)}
+#ask-title{font-size:13px;color:var(--text);margin-bottom:14px;line-height:1.5}
+#ask-input{width:100%;margin-bottom:16px}
+#ask-btns{display:flex;justify-content:flex-end;gap:10px}
 #modal{display:none;position:fixed;inset:0;background:rgba(2,4,9,.88);z-index:100;padding:46px;backdrop-filter:blur(4px)}
 #modal.open{display:flex;align-items:flex-start;justify-content:center}
 #modal-box{background:var(--panel-solid);border:1px solid var(--line-strong);max-width:780px;width:100%;
@@ -371,10 +383,10 @@ input[type=password]:focus{border-color:var(--blue)}
 <div id="topbar">
   <div id="wordmark">CREWOS<em data-i18n="brand_sub">MISSION CONTROL</em></div>
   <nav>
-    <div class="tab active" data-v="orbit" data-i18n="nav_orbit">ORBIT</div>
-    <div class="tab" data-v="board" data-i18n="nav_board">MISSIONS</div>
-    <div class="tab" data-v="cost" data-i18n="nav_cost">COST</div>
-    <div class="tab" data-v="config" data-i18n="nav_config">CONFIG</div>
+    <button class="tab active" type="button" data-v="orbit" data-i18n="nav_orbit">ORBIT</button>
+    <button class="tab" type="button" data-v="board" data-i18n="nav_board">MISSIONS</button>
+    <button class="tab" type="button" data-v="cost" data-i18n="nav_cost">COST</button>
+    <button class="tab" type="button" data-v="config" data-i18n="nav_config">CONFIG</button>
   </nav>
   <div class="grow"></div>
   <div class="clockbox"><span class="micro" data-i18n="tz_label">北京</span><b id="utc">--:--:--</b></div>
@@ -489,7 +501,7 @@ input[type=password]:focus{border-color:var(--blue)}
   <div id="config-grid">
     <div>
       <div class="panel collapsible">
-        <div class="panel-h" onclick="toggleCollapse(this)"><span class="micro" data-i18n="prov_title">供应商总览 / 自定义</span>
+        <div class="panel-h" role="button" tabindex="0" onclick="toggleCollapse(this)"><span class="micro" data-i18n="prov_title">供应商总览 / 自定义</span>
           <span class="ctoggle">＋</span></div>
         <div class="cbody" style="display:none">
         <div class="cfg-body">
@@ -513,7 +525,7 @@ input[type=password]:focus{border-color:var(--blue)}
         </div>
       </div>
       <div class="panel collapsible" style="margin-top:16px">
-        <div class="panel-h" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_budget">预算 / 安全 / 通知</span>
+        <div class="panel-h" role="button" tabindex="0" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_budget">预算 / 安全 / 通知</span>
           <span class="ctoggle">＋</span></div>
         <div class="cbody" style="display:none">
         <div class="cfg-body">
@@ -536,7 +548,7 @@ input[type=password]:focus{border-color:var(--blue)}
         </div>
       </div>
       <div class="panel collapsible" style="margin-top:16px">
-        <div class="panel-h" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_perf">模型胜任度 / Performance</span>
+        <div class="panel-h" role="button" tabindex="0" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_perf">模型胜任度 / Performance</span>
           <span class="ctoggle">＋</span></div>
         <div class="cbody" style="display:none">
           <div class="cfg-body"><span class="micro" id="ev-samples" style="color:var(--dim)">--</span>
@@ -546,7 +558,7 @@ input[type=password]:focus{border-color:var(--blue)}
     </div>
     <div>
       <div class="panel collapsible">
-        <div class="panel-h" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_adv">高级:逐通道 LLM 绑定 / failover</span>
+        <div class="panel-h" role="button" tabindex="0" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_adv">高级:逐通道 LLM 绑定 / failover</span>
           <span class="ctoggle">＋</span></div>
         <div class="cbody" style="display:none">
         <div class="cfg-body">
@@ -584,7 +596,7 @@ input[type=password]:focus{border-color:var(--blue)}
         </div>
       </div>
       <div class="panel collapsible" style="margin-top:16px">
-        <div class="panel-h" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_dossier">档案编辑 / Dossiers</span>
+        <div class="panel-h" role="button" tabindex="0" onclick="toggleCollapse(this)"><span class="micro" data-i18n="sec_dossier">档案编辑 / Dossiers</span>
           <span class="micro" id="f-status"></span><span class="ctoggle">＋</span></div>
         <div class="cbody" style="display:none">
         <div class="cfg-body">
@@ -755,11 +767,44 @@ function toggleLang(){LANG=LANG==="zh"?"en":"zh";try{localStorage.setItem("crewo
 }
 let agents=[],agentCost={},totalCost=0,nodePos={},orbitT=0,replayMode=false,providers=[],recs={};
 
+/* 内联输入弹窗(替代原生 prompt():不阻塞页面、风格统一、Enter 提交 Esc 取消)。返回 Promise<string|null> */
+function uiPrompt(opts){
+  opts=opts||{};
+  return new Promise(resolve=>{
+    let m=$("#ask");
+    if(!m){
+      m=document.createElement("div");m.id="ask";
+      m.innerHTML='<div id="ask-box"><div id="ask-title"></div>'
+        +'<input id="ask-input" autocomplete="off">'
+        +'<div id="ask-btns"><button class="btn" type="button" data-r="cancel">取消</button>'
+        +'<button class="btn solid" type="button" data-r="ok"></button></div></div>';
+      document.body.appendChild(m);
+    }
+    const inp=m.querySelector("#ask-input"),okb=m.querySelector('[data-r="ok"]'),cb=m.querySelector('[data-r="cancel"]');
+    m.querySelector("#ask-title").textContent=opts.title||"";
+    okb.textContent=opts.ok||"确定";
+    inp.type=opts.type||"text";inp.placeholder=opts.placeholder||"";inp.value=opts.value!=null?opts.value:"";
+    m.classList.add("open");
+    setTimeout(()=>{inp.focus();try{inp.select()}catch(e){}},30);
+    function finish(val){m.classList.remove("open");okb.onclick=cb.onclick=m.onclick=inp.onkeydown=null;resolve(val);}
+    okb.onclick=()=>finish(inp.value);
+    cb.onclick=()=>finish(null);
+    m.onclick=(ev)=>{if(ev.target===m)finish(null);};
+    inp.onkeydown=(ev)=>{if(ev.key==="Enter"){ev.preventDefault();finish(inp.value);}
+                         else if(ev.key==="Escape"){ev.preventDefault();finish(null);}};
+  });
+}
+
 /* 访问令牌:任意请求 401 → 询问 token 并以 ?token= 重进(服务端会种 cookie) */
 const _fetch=window.fetch.bind(window);
+let _askingToken=false;
 window.fetch=async(...a)=>{const r=await _fetch(...a);
-  if(r.status===401){const t=prompt("Mission Control 已开启访问令牌,请输入 token:");
-    if(t)location.href="/?token="+encodeURIComponent(t);throw new Error("unauthorized")}
+  if(r.status===401){
+    if(!_askingToken){_askingToken=true;
+      const t=await uiPrompt({title:"Mission Control 已开启访问令牌,请输入 token",type:"password",ok:"进入"});
+      _askingToken=false;
+      if(t)location.href="/?token="+encodeURIComponent(t);}
+    throw new Error("unauthorized")}
   return r};
 
 $$(".tab").forEach(t=>t.onclick=()=>{
@@ -854,6 +899,12 @@ document.addEventListener("keydown",e=>{
   if($("#welcome")?.classList.contains("open"))return closeWelcome();
   if($("#modal")?.classList.contains("open"))return $("#modal").classList.remove("open");
   if(_focused)clearFocus();
+});
+// 键盘可达性:可折叠面板头(role=button)用 Enter/空格 触发展开收起
+document.addEventListener("keydown",e=>{
+  if((e.key==="Enter"||e.key===" ")&&e.target.matches&&e.target.matches('.panel-h[role="button"]')){
+    e.preventDefault();e.target.click();
+  }
 });
 
 /* ════════ 欢迎 / 分步引导 ════════ */
@@ -1184,7 +1235,7 @@ async function taskCancel(tid){
   alert_("warn","CANCELLED",tid+" 已取消");loadMissions();
 }
 async function taskBudget(tid){
-  const v=prompt("新的任务预算上限(¥ 人民币):","36");   // 输入人民币,内部折回美元给引擎
+  const v=await uiPrompt({title:"新的任务预算上限(¥ 人民币)",type:"number",value:"36",ok:"提额"});   // 输入人民币,内部折回美元给引擎
   if(!v||!(+v>0))return;
   const usd=(+v)/CNY;
   await fetch("/api/task/"+tid+"/budget",{method:"POST",
@@ -1530,9 +1581,9 @@ function roleCard(key,name,role,model,provId,withRec,fb,temp){
 function rcMore(key){const m=$("#rcmore-"+key);m.classList.toggle("show");
   $("#rcml-"+key).textContent=m.classList.contains("show")?"⋯ 收起":t("more_opts");}
 async function addAgent(){
-  const name=(prompt("新成员名称(小写字母/数字/下划线,如 designer):")||"").trim().toLowerCase();
+  const name=(await uiPrompt({title:"新成员名称(小写字母/数字/下划线,如 designer)",placeholder:"designer",ok:"下一步"})||"").trim().toLowerCase();
   if(!name)return;
-  const role=(prompt("一句话职责(可留空,如 海报设计/SEO):")||"").trim();
+  const role=(await uiPrompt({title:`一句话职责(可留空,如 海报设计/SEO)— 成员 ${name}`,placeholder:"海报设计 / SEO",ok:"创建"})||"").trim();
   const r=await fetch("/api/agent",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({name,role})});
   if(!r.ok){const e=await r.json();alert_("err","AGENT",e.detail||e.error||"新增失败");return}

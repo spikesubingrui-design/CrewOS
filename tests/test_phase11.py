@@ -107,3 +107,18 @@ def test_umemory_recall_injected_into_orchestrate(monkeypatch):
         r = Router(_ws(tmp), Ledger(tmp / "l.db"))
         ceomod.orchestrate(r, "m", "mock://", "", "随便", root=str(tmp), settings={})
         assert "U_MEMORY" in captured.get("user", "")   # 召回确实注入了规划提示词
+
+
+def test_budget_rejects_when_worst_case_overshoots():
+    """单次派单上限保护:剩余预算不足以覆盖最坏成本 → 拒发(不截断),记 budget_block。"""
+    import pytest
+    from crewos.router import Router, BudgetExceeded
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        r = Router(_ws(tmp), Ledger(tmp / "l.db"))
+        tid = r.ledger.new_task("t")
+        # 上限 $0.005 远小于一次 8192-token 输出的最坏成本 → 应拒发
+        with pytest.raises(BudgetExceeded):
+            r.dispatch("writer", "做点事", task_id=tid, budget_usd=0.005)
+        types = [e["type"] for e in r.ledger.task_events(tid)]
+        assert "budget_block" in types

@@ -130,9 +130,9 @@ def test_budget_cap():
         router = Router(make_workspace(tmp, MOCK_ONLY), Ledger(tmp / "l.db"),
                         default_task_budget_usd=0.000001)
         task_id = router.ledger.new_task("预算测试")
-        router.dispatch("tester", "第一次,花掉一点钱", task_id=task_id)
+        # v0.14.8 单次上限保护:微小预算连一次派单最坏成本都盖不住 → 直接熔断(不截断)
         try:
-            router.dispatch("tester", "第二次应被熔断", task_id=task_id)
+            router.dispatch("tester", "应被熔断", task_id=task_id)
             assert False, "应抛出 BudgetExceeded"
         except BudgetExceeded:
             pass

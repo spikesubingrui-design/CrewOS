@@ -101,7 +101,7 @@ def test_budget_override_unblocks():
         router = Router(make_ws(tmp), Ledger(tmp / "l.db"),
                         default_task_budget_usd=0.000001)
         tid = router.ledger.new_task("提额测试")
-        router.dispatch("tester", "先花一点", task_id=tid)
+        # v0.14.8 单次上限保护:微小预算连一次派单的最坏成本都盖不住 → 直接拒发(不截断)
         try:
             router.dispatch("tester", "应熔断", task_id=tid)
             assert False
@@ -109,7 +109,7 @@ def test_budget_override_unblocks():
             pass
         router.ledger.log(tid, "budget_override", "user",
                           payload={"budget_usd": 5.0})
-        r = router.dispatch("tester", "提额后续跑", task_id=tid)   # 不再熔断
+        r = router.dispatch("tester", "提额后续跑", task_id=tid)   # 提额后不再熔断
         assert r["task_id"] == tid
         assert router.task_budget_override(tid) == 5.0
 

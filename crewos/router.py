@@ -358,6 +358,19 @@ class Router:
                 "summary": f"任务 {task_id} 已花 ${spent:.4f},达上限 ${cap} 的 80%——"
                            f"建议尽快收尾,撞线将熔断。", "agent": name})
 
+        # 单次派单上限保护:估算本次最坏成本(满 max_tokens 输出),若会冲破上限则**拒发而非截断**。
+        # (压低 max_tokens 会让推理模型把额度烧在思维链上、正文产空 —— 见马里奥事故;故选择拒绝+上报。)
+        est_in_tok = (len(instruction) + len(context)) // 4
+        worst = (est_in_tok * agent.price_in_per_m + max_tokens * agent.price_out_per_m) / 1_000_000
+        if worst > 0 and spent + worst > cap:
+            self.ledger.log(task_id, "budget_block", "router", "user", payload={
+                "reason": f"剩余预算 ${cap - spent:.4f} 不足以安全完成一次 {name} 派单"
+                          f"(最坏约 ${worst:.4f});已拒发,保证不超 ${cap} 上限。提额或调小 max_tokens 后重试。",
+                "agent": name})
+            raise BudgetExceeded(
+                f"任务 {task_id} 剩余预算不足以安全跑一次 {name}(需 ~${worst:.4f},剩 ${cap - spent:.4f})。"
+                f"请提额或调小 max_tokens。")
+
         system = agent.role_prompt
         digest = agent.memory_digest(query=instruction)
         if digest:

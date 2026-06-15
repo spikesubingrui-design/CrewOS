@@ -87,14 +87,15 @@ def test_agent_pause_blocks_dispatch():
 def test_soft_budget_warn_then_hard_block():
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
-        # cap=0.001;预存 0.0009(=90%)→ 下一发落在 [80%,100%) 软线窗口
-        r = Router(make_ws(tmp), Ledger(tmp / "l.db"), default_task_budget_usd=0.001)
+        # cap=0.1,预存 0.082(=82%)→ 落在 [80%,100%) 软线窗口,
+        # 且剩余 0.018 仍盖得住一次派单最坏成本(~0.0164),故 v0.14.8 单次保护放行 → 软告警。
+        r = Router(make_ws(tmp), Ledger(tmp / "l.db"), default_task_budget_usd=0.1)
         tid = r.ledger.new_task("预算软硬线")
-        r.ledger.log(tid, "task_result", "tester", "ceo", model="m", cost_usd=0.0009)
-        r.dispatch("tester", "软线内一发", task_id=tid)        # 入口 90%,不熔断 → 软告警
+        r.ledger.log(tid, "task_result", "tester", "ceo", model="m", cost_usd=0.082)
+        r.dispatch("tester", "软线内一发", task_id=tid)        # 入口 82%,放行 → 软告警
         assert len([e for e in r.ledger.task_events(tid) if e["type"] == "budget_warn"]) == 1
-        # 把花费顶过上限,再发 → 硬熔断
-        r.ledger.log(tid, "task_result", "tester", "ceo", model="m", cost_usd=0.0005)
+        # 把花费顶过上限,再发 → 硬熔断(已花 ≥ 上限,先于单次保护触发)
+        r.ledger.log(tid, "task_result", "tester", "ceo", model="m", cost_usd=0.05)
         try:
             r.dispatch("tester", "撞硬线", task_id=tid)
             assert False, "应熔断"

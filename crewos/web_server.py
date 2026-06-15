@@ -658,6 +658,24 @@ def api_get_file(path: str):
     return {"path": path, "content": f.read_text(encoding="utf-8")}
 
 
+@app.get("/api/file/default")
+def api_get_file_default(path: str):
+    """返回该档案的出厂默认内容(打包模板),供「恢复默认」用;只读不写盘。"""
+    if not EDITABLE.match(path):
+        return JSONResponse({"error": "path_not_allowed"}, status_code=403)
+    from .workspace import template_root
+    troot = template_root()
+    tf = (troot / path).resolve()
+    if not str(tf).startswith(str(troot.resolve())):   # 防路径穿越
+        return JSONResponse({"error": "path_not_allowed"}, status_code=403)
+    if tf.exists():
+        return {"path": path, "content": tf.read_text(encoding="utf-8"), "has_default": True}
+    # 错题本等运行期生成、无出厂模板的文件 → 给空骨架
+    if path.endswith("memory/lessons.md"):
+        return {"path": path, "content": "# 错题本\n", "has_default": True}
+    return {"path": path, "content": "", "has_default": False}
+
+
 class ChannelCfg(BaseModel):
     name: str
     endpoint: str

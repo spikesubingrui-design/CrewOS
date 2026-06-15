@@ -76,6 +76,8 @@ nav{display:flex;gap:4px;height:100%}
 .crew-row.offline .lamp{background:var(--red);box-shadow:0 0 9px var(--red)}
 @keyframes lamppulse{50%{opacity:.4}}
 .crew-row .cs{font-weight:600;font-size:12px;letter-spacing:.08em}
+.crew-row .rtl{color:var(--ice);font-weight:500;font-size:9.5px;letter-spacing:.04em;margin-left:7px;opacity:.85}
+.crew-row .rtl:empty{display:none}
 .crew-row .md{color:var(--dim);font-size:10px;margin-top:2px}
 .crew-row .$${color:var(--amber);font-size:10.5px;font-variant-numeric:tabular-nums}
 .crew-row .st{font-size:9px;letter-spacing:.18em;color:var(--dim);text-align:right;margin-top:2px}
@@ -602,7 +604,10 @@ input[type=password]:focus{border-color:var(--blue)}
         <div class="cfg-body">
           <div class="frow"><select id="f-select" onchange="loadFile()" style="width:100%"></select></div>
           <textarea id="f-content" spellcheck="false"></textarea>
-          <div style="margin-top:14px"><button class="btn" onclick="saveFile()">COMMIT DOSSIER</button></div>
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn solid" onclick="saveFile()" data-i18n="commit_dossier">COMMIT DOSSIER</button>
+            <button class="btn" onclick="restoreDefault()" data-i18n="restore_default">↺ 恢复默认</button>
+          </div>
         </div>
         </div>
       </div>
@@ -671,6 +676,9 @@ function bjClock(ms){
 // 货币:引擎内部一律美元(模型定价 USD/百万 token);展示统一折算人民币 ¥(汇率可在 CONFIG 改)
 let CNY=7.2;
 function money(usd){return "¥"+((usd||0)*CNY).toFixed(2);}
+// 后端字符串里残留的美元值($x.xx)统一折算成 ¥,与看板其余金额口径一致(中/英文都折)
+function cnyize(s){return (s||"").replace(/\$\s?([0-9][0-9,]*\.?[0-9]*)/g,
+  (m,n)=>"¥"+(parseFloat(n.replace(/,/g,""))*CNY).toFixed(2));}
 setInterval(()=>{
   document.getElementById("utc").textContent=bjClock(Date.now());
   const s=Math.floor((Date.now()-t0)/1000);
@@ -680,6 +688,12 @@ setInterval(()=>{
 /* ════════ 状态 ════════ */
 const CALLSIGN={coder:"CODER-1",writer:"WRITER-1",researcher:"RECON-1",analyst:"ANLYT-1",
   builder:"BUILD-1",runner:"CARGO-1",perceiver:"OPTIC-1"};
+// 中文/英文职称(点名册在中文模式显示中文职称;随语言切换实时更新)
+const ROLE_TITLE={researcher:{zh:"研究员",en:"Researcher"},writer:{zh:"文案",en:"Copywriter"},
+  coder:{zh:"工程师",en:"Engineer"},analyst:{zh:"分析师",en:"Analyst"},
+  builder:{zh:"行政",en:"Operations"},runner:{zh:"批处理",en:"Runner"},
+  perceiver:{zh:"多模态",en:"Perceiver"}};
+function roleTitle(name){const r=ROLE_TITLE[name];return r?(r[LANG]||r.en):"";}
 // 每个 agent 固定一种主题色(节点核心/名号/脉冲同色)
 const AGENT_COLORS={researcher:"#4f7cff",writer:"#2ee59d",coder:"#ff5c5c",analyst:"#ffb454",
   builder:"#b79cff",runner:"#46d6e5",perceiver:"#ff7ac0"};
@@ -751,11 +765,17 @@ const I18N={
   nav_orbit:{zh:"轨道",en:"ORBIT"},nav_board:{zh:"任务",en:"MISSIONS"},
   nav_cost:{zh:"成本",en:"COST"},nav_config:{zh:"配置",en:"CONFIG"},
   tz_label:{zh:"北京",en:"CST"},
+  commit_dossier:{zh:"提交档案",en:"COMMIT DOSSIER"},
+  restore_default:{zh:"↺ 恢复默认",en:"↺ Restore default"},
+  default_loaded:{zh:"默认已载入(点提交生效)",en:"Default loaded (commit to apply)"},
+  no_default:{zh:"该档案没有出厂默认",en:"No factory default for this file"},
+  dossier_tag:{zh:"档案",en:"DOSSIER"},
 };
 function t(k){return (I18N[k]||{})[LANG]||(I18N[k]||{}).en||k}
 function applyI18n(){
   $$("[data-i18n]").forEach(el=>{el.textContent=t(el.getAttribute("data-i18n"))});
   $$("[data-i18n-ph]").forEach(el=>{el.placeholder=t(el.getAttribute("data-i18n-ph"))});
+  $$("[data-role]").forEach(el=>{el.textContent=roleTitle(el.getAttribute("data-role"))});
   document.documentElement.lang=LANG==="zh"?"zh":"en";
   const lb=$("#lang-btn");if(lb)lb.innerHTML=LANG==="zh"?"中 / <b style='color:var(--ice)'>EN</b>":"<b style='color:var(--ice)'>中</b> / EN";
   const ceoOpt=$("#tx-agent")?.querySelector('option[value="__ceo__"]');if(ceoOpt)ceoOpt.text=t("ceo_opt");
@@ -839,7 +859,7 @@ async function init(){
     ml.insertAdjacentHTML("beforeend",`
       <div class="crew-row" id="crew-${a.name}" style="cursor:pointer" onclick="focusCrew('${a.name}')">
         <div class="lamp"></div>
-        <div><div class="cs">${cs}</div><div class="md">${a.model}</div></div>
+        <div><div class="cs">${cs}<span class="rtl" data-role="${a.name}">${roleTitle(a.name)}</span></div><div class="md">${a.model}</div></div>
         <div><div class="$$" id="mcost-${a.name}">¥0.00</div><div class="st" id="mst-${a.name}">STANDBY</div></div>
       </div>`);
     field.insertAdjacentHTML("beforeend",`
@@ -1168,7 +1188,7 @@ async function loadApprovals(){
 }
 // 把交付文件路径(/deliverables/<task>/<file>)渲染成可点链接,新窗口直接打开/运行
 function linkifyBrief(s){
-  return s.replace(/\/deliverables\/[A-Za-z0-9_.\/-]+/g,
+  return cnyize(s).replace(/\/deliverables\/[A-Za-z0-9_.\/-]+/g,
       m=>`<a href="${m}" target="_blank" class="dlink">▸ ${m.split('/').pop()}</a>`)
     .replace(/\n/g,"<br>");
 }
@@ -1193,7 +1213,7 @@ function tele(ev,brief){
 function alert_(kind,tag,msg){
   const d=document.createElement("div");
   d.className="alertbar "+(kind==="err"?"":kind);
-  d.innerHTML=`<span class="tag">▮ ${tag}</span><span>${esc(msg)}</span>`;
+  d.innerHTML=`<span class="tag">▮ ${tag}</span><span>${cnyize(esc(msg))}</span>`;
   $("#alerts").appendChild(d);setTimeout(()=>d.remove(),7000);
 }
 
@@ -1281,7 +1301,7 @@ async function recorder(tid){
     return `<div class="rec ${cls}">
       <span class="rm">${bjClock(ev.ts*1000)}<br>
         ${ev.from_agent.toUpperCase()}${ev.to_agent?" → "+ev.to_agent.toUpperCase():""}</span>
-      <span><b>${ev.type.toUpperCase()}</b> · R${ev.round}${cost}<br>${esc(p.summary||p.title||p.reason||"")}</span></div>`;
+      <span><b>${ev.type.toUpperCase()}</b> · R${ev.round}${cost}<br>${cnyize(esc(p.summary||p.title||p.reason||""))}</span></div>`;
   }).join("");
   $("#modal").classList.add("open");
 }
@@ -1383,6 +1403,16 @@ async function saveFile(){
     alert_("err","INVALID CONFIG",e.detail||e.error||"保存失败");return}
   $("#f-status").textContent="COMMITTED "+p;
   alert_("info","DOSSIER",p+" committed");
+}
+// 恢复出厂默认:把模板默认内容载入文本框,等用户确认后再 COMMIT(避免误改无法挽回)
+async function restoreDefault(){
+  const p=$("#f-select").value;
+  let r;
+  try{r=await (await fetch("/api/file/default?path="+encodeURIComponent(p))).json();}catch(e){r={};}
+  if(!r||!r.has_default){alert_("err",t("dossier_tag"),t("no_default"));return;}
+  $("#f-content").value=r.content;
+  $("#f-status").textContent=t("default_loaded")+" "+p;
+  alert_("info",t("dossier_tag"),t("default_loaded"));
 }
 /* ════════ LLM 配置(换脑不换人) ════════ */
 function llmInit(){

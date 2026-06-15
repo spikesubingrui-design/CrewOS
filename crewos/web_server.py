@@ -461,31 +461,6 @@ def api_jobs():
     return load_jobs(ROOT)
 
 
-# ---------- Paperclip 适配器:CrewOS 乘组作为 Paperclip 员工 ----------
-
-@app.get("/paperclip/manifest")
-def api_paperclip_manifest():
-    """Paperclip 配置 http adapter 时可读的发现信息:可派的乘组成员清单。"""
-    r = _router()
-    return {
-        "adapter": "crewos_http", "version": "1",
-        "execute_url": "/paperclip/execute",
-        "crew": [{"name": n, "status": r.agent_status(n)} for n in r.list_agents()],
-        "note": "在 Paperclip 里把 agent 的 adapterType 设为 http,指向 /paperclip/execute;"
-                "adapterConfig.crew_agent 选派给哪个乘组成员。",
-    }
-
-
-@app.post("/paperclip/execute")
-async def api_paperclip_execute(payload: dict):
-    """Paperclip 每次唤醒这名"员工"就 POST 一份 run-context;CrewOS 派单并按
-    AdapterExecutionResult 形状返回。受 dashboard_token 保护(中间件已统一处理)。"""
-    from .paperclip import execute
-    def run():
-        return execute(_router(), payload)
-    return await asyncio.to_thread(run)
-
-
 @app.get("/api/approvals")
 def api_approvals():
     return _risk().pending()

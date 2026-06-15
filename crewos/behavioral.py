@@ -5,8 +5,7 @@ eval_report(ledger.py)是线上遥测(产出后看一次过率/成本);这一层
 (中文创作不崩、JSON 严格、来源齐全、不照搬指令里的违禁词…),跨多个模型一键对比,
 作为换模型决策依据与 CI 门禁。
 
-复用 checks.py 的断言原语,不引外部依赖;有 promptfoo 的人也可把同一套 cases
-导出成 promptfooconfig(导出函数见 to_promptfoo)。
+复用 checks.py 的断言原语,不引外部依赖。
 """
 from __future__ import annotations
 
@@ -103,25 +102,3 @@ def run_suite(models: list[dict], cases: list[dict] | None = None) -> dict:
             "cases": per_case,
         }
     return {"n_cases": len(cases), "models": matrix}
-
-
-def to_promptfoo(cases: list[dict] | None = None) -> str:
-    """把用例导出成 promptfooconfig.yaml(给装了 promptfoo 的人;断言用 contains/regex)。"""
-    cases = cases or DEFAULT_CASES
-    tests = []
-    for c in cases:
-        asserts = []
-        for chk in c.get("checks", []):
-            t = chk["type"]
-            if t == "must_include":
-                asserts += [{"type": "contains", "value": v} for v in chk["values"]]
-            elif t == "forbid":
-                asserts += [{"type": "not-contains", "value": v} for v in chk["values"]]
-            elif t == "must_match":
-                asserts.append({"type": "regex", "value": chk["pattern"]})
-            elif t == "json_parseable":
-                asserts.append({"type": "is-json"})
-        tests.append({"vars": {"prompt": c["prompt"]}, "assert": asserts,
-                      "description": c["id"]})
-    return yaml.safe_dump({"prompts": ["{{prompt}}"], "tests": tests},
-                          allow_unicode=True, sort_keys=False)

@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from crewos.behavioral import DEFAULT_CASES, run_suite, to_promptfoo
+from crewos.behavioral import DEFAULT_CASES, run_suite
 from crewos.doctor import diagnose
 from crewos.ledger import Ledger
 from crewos.router import AgentPaused, BudgetExceeded, Router
@@ -139,41 +139,7 @@ def test_behavioral_suite_on_mock():
     assert set(m["cases"].keys()) == {c["id"] for c in DEFAULT_CASES}
 
 
-def test_promptfoo_export():
-    y = to_promptfoo()
-    assert "prompts:" in y and "tests:" in y and "assert:" in y
-
-
-# ---------- Paperclip 适配器 ----------
-
-def test_paperclip_execute_and_session_roundtrip():
-    from crewos.paperclip import execute
-    with tempfile.TemporaryDirectory() as d:
-        tmp = Path(d)
-        r = Router(make_ws(tmp), Ledger(tmp / "l.db"))
-        payload = {
-            "agent": {"name": "crew-dept", "adapterConfig": {"crew_agent": "tester"}},
-            "context": {"title": "调研竞品", "body": "找三个多agent框架"},
-        }
-        res = execute(r, payload)
-        assert res["exitCode"] == 0 and res["provider"] == "crewos"
-        assert res["model"] == "mock-model" and res["costUsd"] > 0
-        tid = res["sessionParams"]["crewos_task_id"]
-        assert tid and res["sessionParams"]["round"] == 0
-        # 回传 sessionParams → 续派同一任务,round+1
-        res2 = execute(r, {**payload, "sessionParams": res["sessionParams"]})
-        assert res2["sessionParams"]["crewos_task_id"] == tid
-        assert res2["sessionParams"]["round"] == 1
-        rounds = [e["round"] for e in r.ledger.task_events(tid) if e["type"] == "task_assign"]
-        assert 0 in rounds and 1 in rounds  # 同一任务两轮派单
-
-
-def test_paperclip_execute_paused_returns_nonzero():
-    from crewos.paperclip import execute
-    with tempfile.TemporaryDirectory() as d:
-        tmp = Path(d)
-        r = Router(make_ws(tmp), Ledger(tmp / "l.db"))
-        r.pause_agent("tester", "测试")
-        res = execute(r, {"agent": {"adapterConfig": {"crew_agent": "tester"}},
-                          "context": {"title": "x"}})
-        assert res["exitCode"] == 1 and "AgentPaused" in res["summary"]
+def test_promptfoo_export_removed():
+    """promptfoo 导出已下线(瘦身 v0.14.14):函数不再存在。"""
+    import crewos.behavioral as bh
+    assert not hasattr(bh, "to_promptfoo")

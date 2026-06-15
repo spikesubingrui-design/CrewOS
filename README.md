@@ -110,13 +110,12 @@ crewos -w /其他/工作区 start        # 多团队隔离(像 mmclaw -w)
 - **Silent Watchdog**:后台监控"派单后久无产出"的任务(便宜模型易跑飞),分级 suspicious/critical 自动上报;`crewos doctor` 用失败分类学诊断停工原因 + 下一步建议
 - **预算硬刹车**:单任务 80% 软告警 + 撞线熔断;月度硬上限自动暂停全员;`crewos pause/resume <agent>` 或看板手动暂停,暂停态拒绝派单
 - **post-run-eval**:CEO 手册升级——成功任务也强制复盘,按 learning/pattern/decision/preference 四类沉淀经验(不再只在打回时学)
-- **离线行为评估**:`crewos eval-behavior` 派真单前就测每个便宜模型的合规率(JSON 严格/不照搬注入/来源齐全…),换模型决策有据;可导出 promptfoo 配置
-- **CrewOS × Paperclip 适配器**:`/paperclip/execute` 让一整支 CrewOS 乘组被"招聘"进 [Paperclip](https://github.com/paperclipai/paperclip) 公司当一名员工(走它内置 http adapter,无需写 TS);sessionParams 往返实现跨心跳审阅续作 —— 见 [docs/PAPERCLIP-ADAPTER.md](docs/PAPERCLIP-ADAPTER.md)。**Hermes×CrewOS×Paperclip 三者各归其位**:Paperclip 当公司外壳,CrewOS 当经理大脑,便宜模型/Hermes 当执行手
+- **离线行为评估**:`crewos eval-behavior` 派真单前就测每个便宜模型的合规率(JSON 严格/不照搬注入/来源齐全…),换模型决策有据
 
 ## 验收
 
 ```bash
-python3 -m pytest tests/   # 38 项:派单台账/failover/宕机上报/DLP双向/熔断与提额/回放/风险分级/错题本/cron/通知/记忆/多模态/评估/检查层/心跳/校验/watchdog/暂停门禁/doctor/行为评估/paperclip适配器
+python3 -m pytest tests/   # 派单台账/failover/宕机上报/DLP双向/熔断与提额/回放/风险分级/错题本/cron/通知(飞书+企微+Discord)/记忆/多模态/评估/检查层/心跳/校验/watchdog/暂停门禁/doctor/行为评估/CEO调研
 ```
 
 ## 文档(docs/)
@@ -126,7 +125,6 @@ python3 -m pytest tests/   # 38 项:派单台账/failover/宕机上报/DLP双向
 - [MEMORY.md](docs/MEMORY.md) — 三层记忆:错题本 / Memory Tree / U 第二大脑
 - [HARNESS-UPGRADES.md](docs/HARNESS-UPGRADES.md) — 旗舰模型 harness 逐条拆解的 35 项升级图
 - [PAPERCLIP-UPGRADES.md](docs/PAPERCLIP-UPGRADES.md) — paperclip 70k★ 生态对标的 31 项升级 + 差异化定位
-- [PAPERCLIP-ADAPTER.md](docs/PAPERCLIP-ADAPTER.md) — 把 CrewOS 乘组接进 Paperclip 的接法
 
 ## 宣传页
 

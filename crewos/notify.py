@@ -22,7 +22,7 @@ import urllib.request
 NOTIFY_TYPES = {
     "task_done", "task_failed", "escalation", "dlp_block", "budget_block",
     "approval_request", "approval_decision", "failover", "risk_action",
-    "watchdog", "agent_paused",
+    "watchdog", "agent_paused", "clarify",
 }
 
 _EMOJI = {

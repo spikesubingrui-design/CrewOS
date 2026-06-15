@@ -60,6 +60,8 @@ PLAN_SYSTEM = """你是 CrewOS 的总指挥(CEO)。你只决策、不亲自执�
 
 第一步:判断目标值不值得动用团队。
 - 寒暄 / 常识问答 / 简单算术 / 一句话能答的 → 你直接答,输出 JSON 对象:{"direct": "你的回答"}
+- 目标**太含糊 / 缺关键信息**以致无法安全规划(否则只能瞎猜、易做错方向)→ 先反问澄清,
+  输出 JSON 对象:{"clarify": "一句话点出最该补的那 1-2 个关键信息"}。宁可问一句,也不要拿含糊目标乱派。
 - 需要专业能力(写作/编码/研究/数据/行政/批量/视频理解)→ 拆解派单,输出 JSON 数组。
 
 agent 字段**只能是这七个值之一**(全小写英文、区分大小写):
@@ -82,6 +84,9 @@ agent 字段**只能是这七个值之一**(全小写英文、区分大小写):
 
 简单任务直接答:
 {"direct": "你的回答"}
+
+目标含糊先澄清:
+{"clarify": "要做网站,但没说做给谁、什么功能、用什么技术栈——请补一句最关键的"}
 
 工作任务派单(数组,每元素一个派单):
 [{"agent":"coder","instruction":"【目标】用单文件 HTML 做贪吃蛇。【要求】纯前端零依赖、方向键控制。【验收标准】1.双击即玩;2.含计分与游戏结束重开;3.全部代码在一个 .html。【输出格式】单个 ```html 代码块 + 结尾一行 SUMMARY。"}]"""
@@ -125,6 +130,23 @@ def parse_direct(text: str) -> str | None:
         return None
     d = obj.get("direct") if isinstance(obj, dict) else None
     return str(d).strip() if d else None
+
+
+def parse_clarify(text: str) -> str | None:
+    """CEO 判定目标太含糊时返回 {"clarify": "..."};解析出澄清问题则返回它。"""
+    body = text.strip()
+    m = re.search(r"```(?:json)?\s*(.+?)```", body, re.DOTALL)
+    if m:
+        body = m.group(1).strip()
+    m = re.search(r"\{.*\}", body, re.DOTALL)
+    if not m:
+        return None
+    try:
+        obj = json.loads(m.group(0))
+    except (ValueError, TypeError):
+        return None
+    c = obj.get("clarify") if isinstance(obj, dict) else None
+    return str(c).strip() if c else None
 
 
 def parse_plan(text: str, valid_agents: list[str]) -> list[dict]:
@@ -212,6 +234,13 @@ def orchestrate(router, ceo_model: str, endpoint: str, key_env: str, goal: str,
                 "summary": direct, "direct": True})
             return {"task_id": task_id, "plan": [], "summary": direct,
                     "direct": True, "degraded": False}
+        # 含糊→先澄清:目标太含糊就反问,绝不拿含糊目标乱派(防"自信地做错方向")
+        clarify = parse_clarify(plan_resp["content"])
+        if clarify:
+            led.log(task_id, "clarify", "ceo", "user", payload={
+                "summary": clarify, "needs_clarify": True})
+            return {"task_id": task_id, "plan": [], "summary": clarify,
+                    "clarify": clarify, "degraded": False}
         plan = parse_plan(plan_resp["content"], roster)
     except Exception as e:
         led.log(task_id, "escalation", "ceo", "user", payload={

@@ -360,6 +360,17 @@ class DispatchReq(BaseModel):
     media_url: str = ""
 
 
+@app.get("/api/estimate")
+def api_estimate(agent: str, chars: int = 0, max_tokens: int = 8192):
+    """派单前最坏成本预估,给 TRANSMIT 前的「本次预计 ≤ ¥X」预检卡。CEO 编排成本取决于拆单数,返回提示。"""
+    if agent == "__ceo__":
+        return {"ceo": True}
+    try:
+        return _router().estimate(agent, chars, max_tokens)
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:120]}, status_code=400)
+
+
 @app.post("/api/dispatch")
 async def api_dispatch(req: DispatchReq):
     """手动派单(调试/直接驱动)。CEO 审阅循环请通过 Claude Code 的 MCP 走。"""

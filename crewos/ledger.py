@@ -39,7 +39,7 @@ EVENT_TYPES = {
     "task_done", "task_failed", "escalation", "status_update",
     "dlp_block", "budget_block", "failover", "handoff", "retrospect",
     "risk_action", "approval_request", "approval_decision", "lesson_saved",
-    "budget_override", "watchdog", "budget_warn", "agent_paused",
+    "budget_override", "watchdog", "budget_warn", "agent_paused", "clarify",
 }
 
 

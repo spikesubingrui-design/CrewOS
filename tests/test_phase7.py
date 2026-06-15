@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from crewos.ceo import orchestrate, parse_plan
+from crewos.ceo import orchestrate, parse_clarify, parse_plan
 from crewos.ledger import Ledger
 from crewos.router import Router
 
@@ -51,6 +51,41 @@ def test_parse_plan_variants():
         [{"agent": "writer", "instruction": "写"}]
     # 单对象但 agent 非法 → 空
     assert parse_plan('{"agent":"ghost","instruction":"x"}', valid) == []
+
+
+def test_parse_clarify_and_estimate():
+    # #3 含糊→先澄清:解析 {"clarify":...};direct/数组不误判为澄清
+    assert parse_clarify('{"clarify":"做给谁?要什么功能?"}') == "做给谁?要什么功能?"
+    assert parse_clarify('```json\n{"clarify":"补一句"}\n```') == "补一句"
+    assert parse_clarify('{"direct":"你好"}') is None
+    assert parse_clarify('[{"agent":"coder","instruction":"x"}]') is None
+    assert parse_clarify("普通文字") is None
+    # #1 派单前成本预估:最坏成本 = 输入(chars//4)*price_in + max_tokens*price_out
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        router = Router(make_ws(tmp), Ledger(tmp / "l.db"), default_task_budget_usd=2.0)
+        e = router.estimate("writer", chars=400, max_tokens=1000)
+        # (100*1.0 + 1000*2.0)/1e6 = 0.0021
+        assert abs(e["worst_usd"] - 0.0021) < 1e-9
+        assert e["model"] == "mock-model" and e["cap_usd"] == 2.0
+        assert e["est_in_tok"] == 100 and e["max_out_tok"] == 1000
+
+
+def test_orchestrate_clarifies_on_vague_goal(monkeypatch):
+    """CEO 判含糊 → 发 clarify 事件、不派任何单。"""
+    import crewos.ceo as ceomod
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        router = Router(make_ws(tmp), Ledger(tmp / "l.db"))
+        monkeypatch.setattr(ceomod, "_call_openai_compatible",
+                            lambda *a, **k: {"content": '{"clarify":"做给谁?什么功能?"}',
+                                             "tokens_in": 1, "tokens_out": 1})
+        # 用非建造类含糊目标,避免触发 Tavily 调研(与 test_orchestrate_degrades_on_mock 同口径)
+        res = orchestrate(router, "x-model", "http://x/v1", "", "这个你看着办", root=str(tmp))
+        assert res.get("clarify") == "做给谁?什么功能?" and res["plan"] == []
+        types = [e["type"] for e in router.ledger.task_events(res["task_id"])]
+        assert "clarify" in types                  # 发了澄清事件
+        assert "task_result" not in types and "task_done" not in types  # 没派任何单、没结案
 
 
 def test_orchestrate_degrades_on_mock():

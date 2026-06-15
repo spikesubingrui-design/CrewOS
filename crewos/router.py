@@ -270,6 +270,17 @@ class Router:
 
     # ---------- agent 暂停/恢复(预算硬刹车 + 人工) ----------
 
+    def estimate(self, name: str, chars: int = 0, max_tokens: int = 8192) -> dict:
+        """派单前最坏成本预估(USD):满 max_tokens 输出 + 输入按 chars//4 估 token。
+        不落库、不调模型,仅供看板「本次预计 ≤ ¥X」预检卡用。"""
+        agent = load_agent(self.agents_dir, name)
+        est_in_tok = max(0, int(chars)) // 4
+        worst = (est_in_tok * agent.price_in_per_m
+                 + int(max_tokens) * agent.price_out_per_m) / 1_000_000
+        return {"model": agent.model, "worst_usd": round(worst, 6),
+                "cap_usd": round(self.default_task_budget_usd, 6),
+                "est_in_tok": est_in_tok, "max_out_tok": int(max_tokens)}
+
     def agent_status(self, name: str) -> str:
         """从台账推导 agent 状态。最近一次 agent_paused 事件的 action 决定 active/paused。"""
         row = self.ledger._conn.execute(

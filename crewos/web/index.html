@@ -446,10 +446,11 @@ input[type=password]:focus{border-color:var(--blue)}
     </div>
     <div class="panel" id="transmit">
       <span class="micro" data-i18n="tx_label">Transmit</span>
-      <select id="tx-agent"></select>
+      <select id="tx-agent" onchange="estimateTx()"></select>
       <input type="text" id="tx-input" data-i18n-ph="tx_ph" placeholder=""
-             onkeydown="if(event.key==='Enter')txSend()">
+             oninput="scheduleEst()" onkeydown="if(event.key==='Enter')txSend()">
       <button class="btn solid" onclick="txSend()" data-i18n="tx_btn">TRANSMIT ▸</button>
+      <div id="tx-est" class="micro" style="margin-top:7px;color:var(--dim);min-height:13px"></div>
     </div>
   </div>
 </div>
@@ -1162,6 +1163,11 @@ function handleEvent(ev){
       endMissionSoon();break;                                              // 任务收官 → 解除聚焦
     case "retrospect":$("#cmd-status").textContent="DEBRIEF / RETROSPECT";break;
     case "escalation":alert_("err","ESCALATION",brief);endMissionSoon();break;
+    case "clarify":   // CEO 觉得目标太含糊 → 反问;把问题填回输入框,用户补一句重发
+      alert_("warn",LANG==="zh"?"CEO 需澄清":"NEEDS CLARITY",brief);
+      $("#cmd-status").textContent=LANG==="zh"?"等待澄清":"AWAITING CLARITY";
+      {const ti=$("#tx-input");if(ti&&!ti.value){ti.value=brief.replace(/^.*?[::]/,"").trim()+" ";ti.focus();}}
+      endMissionSoon();break;
     case "dlp_block":alert_("err","DLP INTERCEPT",brief);break;
     case "budget_block":alert_("err","FUEL CUTOFF",brief);break;
     case "failover":alert_("warn","CHANNEL SWITCH",brief);break;
@@ -1232,7 +1238,7 @@ function tele(ev,brief){
   const cls={task_assign:"assign",task_result:"result",review_feedback:"review",task_done:"done",
     retrospect:"retro",escalation:"alert",dlp_block:"alert",budget_block:"alert",failover:"review",
     risk_action:"assign",approval_request:"review",approval_decision:"done",lesson_saved:"retro",
-    watchdog:"alert",budget_warn:"review",agent_paused:"alert"}[ev.type]||"";
+    watchdog:"alert",budget_warn:"review",agent_paused:"alert",clarify:"review"}[ev.type]||"";
   const ts=bjClock(ev.ts*1000);   // 北京时间
   const route=ev.to_agent?`${(CALLSIGN[ev.from_agent]||ev.from_agent.toUpperCase())} → ${(CALLSIGN[ev.to_agent]||ev.to_agent.toUpperCase())}`
                          :(CALLSIGN[ev.from_agent]||ev.from_agent.toUpperCase());
@@ -1269,6 +1275,22 @@ async function txSend(){
   const r=await fetch("/api/dispatch",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({agent,instruction:v})});
   if(!r.ok){const e=await r.json();alert_("err","TX FAILED",e.detail||e.error)}
+}
+// #1 派单前成本预估卡:选了 agent + 有输入就显示「本次预计 ≤ ¥X」(防止额度被悄悄烧光)
+let _estT=null;
+function scheduleEst(){clearTimeout(_estT);_estT=setTimeout(estimateTx,400);}
+async function estimateTx(){
+  const el=$("#tx-est");if(!el)return;
+  const agent=$("#tx-agent").value,chars=$("#tx-input").value.length;
+  if(agent==="__ceo__"){el.textContent=chars?(LANG==="zh"?"CDR·CEO:规划+汇总约几分钱,执行成本取决于拆单数":"CDR·CEO: planning+review is cents; exec cost depends on the plan"):"";return;}
+  if(!chars){el.textContent="";return;}
+  try{
+    const e=await (await fetch(`/api/estimate?agent=${encodeURIComponent(agent)}&chars=${chars}`)).json();
+    el.textContent=e.worst_usd!=null
+      ?(LANG==="zh"?`≈ 本次预计 ≤ ${money(e.worst_usd)} · 单任务上限 ${money(e.cap_usd)}`
+                   :`≈ this run ≤ ${money(e.worst_usd)} · per-task cap ${money(e.cap_usd)}`)
+      :"";
+  }catch(_){el.textContent="";}
 }
 /* ════════ MISSIONS / RECORDER ════════ */
 async function loadMissions(){

@@ -84,6 +84,27 @@ def test_agent_pause_blocks_dispatch():
         assert r.dispatch("tester", "恢复后可派")["task_id"]
 
 
+def test_eval_gate_blocks_failed_model_until_override():
+    """改动2:模型 canary 未过 → 闸门拦截派单;没测过放行,override/重测通过放行。"""
+    from crewos.router import EvalGateBlocked
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        r = Router(make_ws(tmp), Ledger(tmp / "l.db"))
+        assert r.dispatch("tester", "没测过应放行")["task_id"]   # 无 eval 记录 → 不拦
+        assert r.record_eval("mock-model", 0.3) is False          # 合规率 30% < 60% → 未过
+        try:
+            r.dispatch("tester", "应被闸门拦")
+            assert False, "应抛 EvalGateBlocked"
+        except EvalGateBlocked:
+            pass
+        assert r.eval_status("mock-model") == {"passed": False, "compliance": 0.3, "threshold": 0.6}
+        r.override_eval("mock-model")                              # 人工放行
+        assert r.eval_status("mock-model") == {"passed": True, "overridden": True}
+        assert r.dispatch("tester", "override 后可派")["task_id"]
+        assert r.record_eval("mock-model", 0.9) is True           # 重测通过 → 放行
+        assert r.dispatch("tester", "重测通过可派")["task_id"]
+
+
 def test_soft_budget_warn_then_hard_block():
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)

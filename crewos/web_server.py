@@ -31,7 +31,7 @@ from .ledger import Ledger
 from .notify import push as notify_push
 from .risk import RiskEngine
 from .router import (AgentPaused, AllChannelsDown, BudgetExceeded,
-                     InboundSensitive, Router, load_agent)
+                     EvalGateBlocked, InboundSensitive, Router, load_agent)
 
 ROOT = Path(".")
 app = FastAPI(title="CrewOS")
@@ -371,6 +371,28 @@ def api_estimate(agent: str, chars: int = 0, max_tokens: int = 8192):
         return JSONResponse({"error": str(e)[:120]}, status_code=400)
 
 
+@app.post("/api/eval/record")
+def api_eval_record(body: dict):
+    """记录一次 canary 评估(model + compliance 0~1),低于阈值则该模型进 eval 闸门拦截态。"""
+    model = str(body.get("model") or "").strip()
+    if not model:
+        return JSONResponse({"error": "missing_model"}, status_code=400)
+    rate = float(body.get("compliance") or 0.0)
+    thr = float(body.get("threshold") or 0.6)
+    passed = _router().record_eval(model, rate, thr)
+    return {"model": model, "passed": passed, "compliance": rate, "threshold": thr}
+
+
+@app.post("/api/eval/override")
+def api_eval_override(body: dict):
+    """人工放行某模型的 eval 闸门。"""
+    model = str(body.get("model") or "").strip()
+    if not model:
+        return JSONResponse({"error": "missing_model"}, status_code=400)
+    _router().override_eval(model)
+    return {"model": model, "overridden": True}
+
+
 @app.post("/api/dispatch")
 async def api_dispatch(req: DispatchReq):
     """手动派单(调试/直接驱动)。CEO 审阅循环请通过 Claude Code 的 MCP 走。"""
@@ -381,7 +403,7 @@ async def api_dispatch(req: DispatchReq):
             budget_usd=req.budget_usd or None, media_url=req.media_url)
     try:
         return await asyncio.to_thread(run)
-    except (BudgetExceeded, AllChannelsDown, InboundSensitive, AgentPaused) as e:
+    except (BudgetExceeded, AllChannelsDown, InboundSensitive, AgentPaused, EvalGateBlocked) as e:
         return JSONResponse({"error": type(e).__name__, "detail": str(e)}, status_code=409)
     except Exception as e:
         return JSONResponse({"error": "dispatch_failed", "detail": str(e)}, status_code=500)

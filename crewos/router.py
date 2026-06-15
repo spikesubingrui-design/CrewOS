@@ -80,6 +80,10 @@ class AgentPaused(Exception):
     """目标 agent 已被暂停(预算硬刹车或人工暂停),拒绝派单直到恢复。"""
 
 
+class EvalGateBlocked(Exception):
+    """模型最近 canary 未过 eval 闸门 → 拒绝把退化模型推上生产,直到重测通过或人工 override。"""
+
+
 def load_agent(agents_dir: str | Path, name: str) -> AgentProfile:
     ws = Path(agents_dir) / name
     cfg = yaml.safe_load((ws / "provider.yaml").read_text(encoding="utf-8"))
@@ -270,6 +274,43 @@ class Router:
 
     # ---------- agent 暂停/恢复(预算硬刹车 + 人工) ----------
 
+    # ───────── eval 闸门:别把退化模型推上生产 ─────────
+    def record_eval(self, model: str, compliance_rate: float,
+                    threshold: float = 0.6, by: str = "user") -> bool:
+        """记录一次 canary 评估结果(合规率)。低于阈值 → 该模型进闸门拦截态。返回是否通过。"""
+        passed = compliance_rate >= threshold
+        self.ledger.log("system", "eval_gate", by, payload={
+            "model": model, "compliance": round(compliance_rate, 4),
+            "threshold": threshold, "passed": passed,
+            "summary": f"{model} canary 合规率 {compliance_rate:.0%} "
+                       f"{'通过' if passed else '未过'}(阈值 {threshold:.0%})"})
+        return passed
+
+    def override_eval(self, model: str, by: str = "user") -> None:
+        """人工放行某模型的 eval 闸门(明知退化也要用,或误判)。"""
+        self.ledger.log("system", "eval_override", by, payload={
+            "model": model, "summary": f"已人工放行 {model} 的 eval 闸门"})
+
+    def eval_status(self, model: str) -> dict | None:
+        """该模型最近一次 canary/override 结果;None = 没测过(放行,不无理由拦截)。"""
+        rows = self.ledger._conn.execute(
+            "SELECT type, payload FROM events WHERE type IN ('eval_gate','eval_override') "
+            "ORDER BY ts DESC").fetchall()
+        for r in rows:
+            try:
+                p = json.loads(r["payload"])
+            except (ValueError, TypeError):
+                continue
+            if p.get("model") != model:
+                continue
+            if r["type"] == "eval_override":
+                return {"passed": True, "overridden": True}
+            if "passed" not in p:        # 跳过派单时的「闸门拦截」标记事件,只认 canary 评估结果
+                continue
+            return {"passed": bool(p.get("passed")), "compliance": p.get("compliance"),
+                    "threshold": p.get("threshold")}
+        return None
+
     def estimate(self, name: str, chars: int = 0, max_tokens: int = 8192) -> dict:
         """派单前最坏成本预估(USD):满 max_tokens 输出 + 输入按 chars//4 估 token。
         不落库、不调模型,仅供看板「本次预计 ≤ ¥X」预检卡用。"""
@@ -341,6 +382,21 @@ class Router:
             self.ledger.log(task_id, "budget_block", "router", payload={
                 "reason": f"{name} 处于暂停态(预算硬刹车/人工),拒绝派单", "agent": name})
             raise AgentPaused(f"{name} 已暂停,无法派单。请先 crewos resume {name} 或在看板恢复。")
+
+        # eval 闸门:该模型最近 canary 未过 → 拒绝把退化模型推上生产(对标 Claude Code 静默降智 6 周的教训)。
+        # 没测过(None)不拦;失败可重测通过或 crewos eval-override <model> 放行。绝不静默换模型,只闸门 + 上报选项。
+        ev = self.eval_status(agent.model)
+        if ev and not ev.get("passed"):
+            self.ledger.log(task_id, "eval_gate", "router", "user", payload={
+                "model": agent.model, "agent": name, "blocked": True,
+                "reason": f"{agent.model} 最近 canary 未过(合规率 {ev.get('compliance')},阈值 {ev.get('threshold')}),"
+                          f"已闸门拦截,避免把退化模型推上生产。",
+                "options": ["重测 canary 通过后自动放行",
+                            f"override 强制放行(明知退化也要用)",
+                            f"授权交接式换模型 → {agent.fallback_model or '未配置备用'}"]})
+            raise EvalGateBlocked(
+                f"{agent.model} 未通过 eval 闸门(canary 合规率 {ev.get('compliance')} < {ev.get('threshold')})。"
+                f"重测通过或 override({name})后再派。")
 
         # 入站 DLP:指令/上下文/媒体 URL 含敏感信息时拒发第三方模型,清理后才能重派
         # (media_url 常带签名/token 查询参数,一并扫描)

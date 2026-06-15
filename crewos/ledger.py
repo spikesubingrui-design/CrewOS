@@ -40,6 +40,7 @@ EVENT_TYPES = {
     "dlp_block", "budget_block", "failover", "handoff", "retrospect",
     "risk_action", "approval_request", "approval_decision", "lesson_saved",
     "budget_override", "watchdog", "budget_warn", "agent_paused", "clarify",
+    "eval_gate", "eval_override",
 }
 
 

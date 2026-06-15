@@ -141,6 +141,27 @@ def test_budget_cap():
     print("✅ 任务预算熔断")
 
 
+EXEC_CLI = """
+model: "cli-exec"
+channels:
+  - {name: cli, endpoint: "exec://cat", key_env: ""}
+pricing: {input_per_m: 0.0, output_per_m: 0.0}
+"""
+
+
+def test_cli_exec_backend():
+    """改动4:exec:// 本地 CLI 执行手 —— 用 `cat` 当替身,它把 prompt 从 stdin 回显到 stdout。"""
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        router = Router(make_workspace(tmp, EXEC_CLI), Ledger(tmp / "l.db"))
+        r = router.dispatch("tester", "ECHO_MARKER_42 请处理")
+        assert "ECHO_MARKER_42" in r["content"]    # cat 回显了喂进去的 prompt
+        assert r["channel"] == "cli" and r["cost_usd"] == 0
+        # 走了完整 router 链路:派单 + 产出都进台账
+        types = [e["type"] for e in router.ledger.task_events(r["task_id"])]
+        assert "task_assign" in types and "task_result" in types
+
+
 def test_replay():
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)

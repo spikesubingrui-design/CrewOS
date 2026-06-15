@@ -132,7 +132,7 @@ def _http_error_detail(e: "urllib.error.HTTPError") -> str:
 
 def list_models(endpoint: str, key: str, timeout: int = 10) -> list[str]:
     """拉取一个 OpenAI 兼容供应商的可用模型列表(GET /models)。失败返回 []。"""
-    if endpoint.startswith("mock://"):
+    if endpoint.startswith(("mock://", "exec://")):   # exec:// 是本地 CLI 执行手,无 /models
         return []
     req = urllib.request.Request(
         endpoint.rstrip("/") + "/models",
@@ -159,9 +159,39 @@ def _content_text(content) -> str:
     return " ".join(p.get("text", p.get("type", "")) for p in content)
 
 
+def _call_cli(channel: Channel, messages: list[dict], timeout: int = 300) -> dict:
+    """exec:// 本地 CLI 执行手 —— 把硬活交给本机的 Claude Code / Codex 等会话,而非便宜 API 模型
+    (对标 OpenClaw 的 ACP harness:CEO 编排 + 现成强力 agent 当执行手)。
+    endpoint 形如 'exec://claude -p' 或 'exec://codex exec';完整 prompt 经 STDIN 喂入
+    (不进 argv,避免命令行注入),stdout 即产出。CLI 自带订阅计费,provider.yaml 的 pricing 通常配 0。"""
+    import shlex
+    import subprocess
+    cmd = channel.endpoint[len("exec://"):].strip()
+    if not cmd:
+        raise ValueError("exec:// 通道未指定命令(例:exec://claude -p)")
+    argv = shlex.split(cmd)
+    parts = []
+    for m in messages:
+        txt = _content_text(m["content"])
+        if txt.strip():
+            parts.append(("[系统]\n" + txt) if m["role"] == "system" else txt)
+    prompt = "\n\n".join(parts)
+    try:
+        proc = subprocess.run(argv, input=prompt, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise OSError(f"找不到 CLI 执行手命令:{argv[0]}(未安装或不在 PATH)")
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0 and not out:
+        raise OSError(f"CLI 执行手 {argv[0]} 退出码 {proc.returncode}:{(proc.stderr or '')[:300]}")
+    return {"content": out, "finish_reason": "stop",
+            "tokens_in": len(prompt) // 4, "tokens_out": len(out) // 4}
+
+
 def _call_openai_compatible(channel: Channel, model: str, messages: list[dict],
                             temperature: float, max_tokens: int, timeout: int = 120) -> dict:
-    """单通道调用。mock:// 通道用于无网络测试。"""
+    """单通道调用。mock:// 无网络测试;exec:// 走本地 CLI 执行手。"""
+    if channel.endpoint.startswith("exec://"):
+        return _call_cli(channel, messages, timeout=max(timeout, 300))
     if channel.endpoint.startswith("mock://"):
         last_user = next((_content_text(m["content"]) for m in reversed(messages)
                           if m["role"] == "user"), "")
@@ -249,7 +279,7 @@ class Router:
             "SELECT channel, ok FROM heartbeats WHERE agent=?", (name,))}
         status = {}
         for ch in agent.channels:
-            if ch.endpoint.startswith("mock://"):
+            if ch.endpoint.startswith(("mock://", "exec://")):   # 本地 CLI 执行手无法廉价 ping,视为在线
                 status[ch.name] = True
                 continue
             try:

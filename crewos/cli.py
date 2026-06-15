@@ -76,7 +76,7 @@ def cmd_start(args):
         import threading
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     from .web_server import run
-    run(ws, args.port)
+    run(ws, args.port, host=getattr(args, "host", None))
 
 
 def cmd_mcp(args):
@@ -246,6 +246,8 @@ def main():
 
     s = sub.add_parser("start", help="启动 Mission Control 看板")
     s.add_argument("--port", type=int, default=8466)
+    s.add_argument("--host", default=None,
+                   help="绑定地址(默认 127.0.0.1;绑非环回地址需先设 dashboard_token)")
     s.add_argument("--no-browser", action="store_true")
     s.set_defaults(fn=cmd_start)
 

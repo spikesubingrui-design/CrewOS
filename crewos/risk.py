@@ -42,13 +42,30 @@ CREATE TABLE IF NOT EXISTS approvals (
 
 
 class RiskEngine:
-    def __init__(self, agents_dir: str | Path, ledger: Ledger):
+    def __init__(self, agents_dir: str | Path, ledger: Ledger,
+                 fail_closed_on_timeout: bool | None = None):
         self.agents_dir = Path(agents_dir)
         self.ledger = ledger
         # 与台账同库:看板/MCP/CLI 是独立进程,经 SQLite WAL 汇合
         self._conn = ledger._conn
         self._conn.executescript(APPROVALS_SCHEMA)
         self._conn.commit()
+        # L3 倒计时到点的语义:默认 fail-OPEN(无人反对→自动放行,向后兼容);
+        # settings.approval_fail_closed=true 则 fail-CLOSED(超时→自动否决,需人工显式批准)。
+        # 未显式传参时从工作区 settings.yaml 读,保证看板/MCP/CLI 三进程口径一致。
+        if fail_closed_on_timeout is None:
+            fail_closed_on_timeout = self._read_fail_closed_setting()
+        self.fail_closed_on_timeout = bool(fail_closed_on_timeout)
+
+    def _read_fail_closed_setting(self) -> bool:
+        try:
+            sf = self.agents_dir.parent / "config" / "settings.yaml"
+            if sf.exists():
+                doc = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+                return bool(doc.get("approval_fail_closed", False))
+        except Exception:
+            pass
+        return False
 
     def action_spec(self, agent: str, action: str) -> dict:
         f = self.agents_dir / agent / "actions.yaml"
@@ -92,23 +109,29 @@ class RiskEngine:
                 "approval_id": aid, "deadline_ts": deadline}
 
     def _resolve_expired(self):
-        """L3 到点自动放行 — 懒结算,多进程读到的结果天然一致。"""
+        """L3 到点结算 — 懒结算,多进程读到的结果天然一致。
+        fail-open(默认):无人反对 → 自动放行;fail-closed:超时 → 自动否决(更安全)。"""
         rows = self._conn.execute(
             "SELECT id, task_id, agent, action FROM approvals "
             "WHERE status='pending' AND deadline_ts IS NOT NULL AND deadline_ts<=?",
             (time.time(),)).fetchall()
+        fc = self.fail_closed_on_timeout
+        new_status = "denied_timeout" if fc else "auto_approved"
+        decided_by = "timeout_failclosed" if fc else "countdown"
         for r in rows:
             cur = self._conn.execute(
-                "UPDATE approvals SET status='auto_approved', decided_ts=?, "
-                "decided_by='countdown' WHERE id=? AND status='pending'",
-                (time.time(), r["id"]))
+                "UPDATE approvals SET status=?, decided_ts=?, decided_by=? "
+                "WHERE id=? AND status='pending'",
+                (new_status, time.time(), decided_by, r["id"]))
             self._conn.commit()
             if cur.rowcount:
                 self.ledger.log(r["task_id"] or "system", "approval_decision",
                                 "system", r["agent"], payload={
                                     "approval_id": r["id"], "action": r["action"],
-                                    "decision": "auto_approved",
-                                    "summary": f"L3 倒计时结束,无人反对 → 自动放行 {r['action']}"})
+                                    "decision": "denied" if fc else "auto_approved",
+                                    "summary": (f"L3 倒计时结束(fail-closed)→ 自动否决 {r['action']},需人工显式批准"
+                                                if fc else
+                                                f"L3 倒计时结束,无人反对 → 自动放行 {r['action']}")})
 
     def check(self, approval_id: str) -> dict:
         self._resolve_expired()

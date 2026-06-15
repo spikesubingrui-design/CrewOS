@@ -422,7 +422,7 @@ class Router:
                 "reason": f"{agent.model} 最近 canary 未过(合规率 {ev.get('compliance')},阈值 {ev.get('threshold')}),"
                           f"已闸门拦截,避免把退化模型推上生产。",
                 "options": ["重测 canary 通过后自动放行",
-                            f"override 强制放行(明知退化也要用)",
+                            "override 强制放行(明知退化也要用)",
                             f"授权交接式换模型 → {agent.fallback_model or '未配置备用'}"]})
             raise EvalGateBlocked(
                 f"{agent.model} 未通过 eval 闸门(canary 合规率 {ev.get('compliance')} < {ev.get('threshold')})。"

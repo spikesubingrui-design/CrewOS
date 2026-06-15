@@ -35,7 +35,60 @@ def append_lesson(agents_dir: str | Path, agent: str, lesson: str,
     day = time.strftime("%Y-%m-%d")
     ref = f"{task_id} R{round}" if task_id else "—"
     f.write_text(f"{text}- {day} | {ref} | {lesson.strip()}\n", encoding="utf-8")
+    _write_skills(agent_dir, f)     # ⑦ 顺带把错题本提炼成可复用经验,自动注入后续派单
     return f
+
+
+SKILLS_HEADER = "# 可复用经验(由错题本自动提炼,复现越多越要遵守)"
+
+
+def synthesize_skills(lessons_text: str, max_chars: int = 1200) -> str:
+    """错题本 → 可复用经验:把反复出现的教训按字符二元组聚类去重,合成"该这么做"的精简清单,
+    按复现次数排序(复现越多越重要)。纯确定性、离线、零成本(对标 Hermes 自我改进闭环,但本地化)。
+    渲染前清洗 CR/LF 与前导 # —— 防一条被污染的教训往系统提示里注入伪段落标题。"""
+    entries = []
+    for l in lessons_text.splitlines():
+        l = l.strip()
+        if not l.startswith("- "):
+            continue
+        body = l[2:]
+        parts = body.split("|", 2)              # "日期 | 引用 | 正文"
+        text = (parts[2] if len(parts) == 3 else body).strip()
+        text = re.sub(r"^审阅打回[::]\s*", "", text)        # 去打回前缀噪声
+        text = re.sub(r"[\r\n]+", " ", text).lstrip("#").strip()   # 防伪标题注入
+        if text:
+            entries.append(text)
+    if not entries:
+        return ""
+    clusters = []   # [{rep, bg, n}]
+    for e in entries:
+        eb = _bigrams(e)
+        best, bestsim = None, 0.0
+        for c in clusters:
+            sim = len(eb & c["bg"]) / max(1, len(eb | c["bg"]))
+            if sim > bestsim:
+                bestsim, best = sim, c
+        if best and bestsim >= 0.5:
+            best["n"] += 1
+            if len(e) < len(best["rep"]):       # 取最短当代表(更通用)
+                best["rep"], best["bg"] = e, eb
+        else:
+            clusters.append({"rep": e, "bg": eb, "n": 1})
+    clusters.sort(key=lambda c: -c["n"])
+    lines = [f"- {c['rep'][:200]}" + (f"(已复现 {c['n']} 次,务必遵守)" if c["n"] > 1 else "")
+             for c in clusters]
+    return (SKILLS_HEADER + "\n\n" + "\n".join(lines))[:max_chars]
+
+
+def _write_skills(agent_dir: Path, lessons_file: Path) -> None:
+    """把错题本提炼成 skills.md(load_agent 的 memory/*.md glob 会自动注入到系统提示)。
+    纯本地文件,永不上传(隐私铁律);提炼失败绝不阻断记教训主流程。"""
+    try:
+        skills = synthesize_skills(lessons_file.read_text(encoding="utf-8"))
+        if skills:
+            (agent_dir / "memory" / "skills.md").write_text(skills + "\n", encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _bigrams(text: str) -> set[str]:

@@ -563,6 +563,9 @@ input[type=password]:focus{border-color:var(--blue)}
             <input type="text" id="s-webhook" placeholder="https://…" style="width:100%"></div>
           <div class="frow"><label class="micro">Access Token(局域网/隧道访问必配,留空关闭)</label>
             <input type="text" id="s-token" placeholder="设置后访问需带 ?token=…" style="width:100%"></div>
+          <div class="frow"><label class="micro" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="s-failclosed" style="width:auto">
+            审批超时 fail-closed(L3 倒计时到点改为「自动否决」而非自动放行,更安全)</label></div>
           <button class="btn" onclick="saveSettings(this)">COMMIT</button>
         </div>
         </div>
@@ -1403,6 +1406,7 @@ async function loadSettings(){
   $("#s-feishu-secret").value=s.feishu_secret||"";$("#s-wecom").value=s.wecom_webhook||"";
   $("#s-discord").value=s.discord_webhook||"";$("#s-tavily").value=s.tavily_key||"";
   $("#s-token").value=s.dashboard_token||"";
+  if($("#s-failclosed"))$("#s-failclosed").checked=!!s.approval_fail_closed;
   const bl=await (await fetch("/api/file?path=config/dlp_blocklist.txt")).json();
   if(bl.content!==undefined)$("#s-blocklist").value=bl.content;
 }
@@ -1416,6 +1420,7 @@ async function saveSettings(btn){
       feishu_webhook:$("#s-feishu").value.trim(),feishu_secret:$("#s-feishu-secret").value.trim(),
       wecom_webhook:$("#s-wecom").value.trim(),discord_webhook:$("#s-discord").value.trim(),
       webhook_url:$("#s-webhook").value.trim(),tavily_key:$("#s-tavily").value.trim(),
+      approval_fail_closed:!!$("#s-failclosed")?.checked,
       dashboard_token:token})});
   if(token)document.cookie="crewos_token="+encodeURIComponent(token)+"; SameSite=Strict";
   await fetch("/api/file",{method:"PUT",headers:{"Content-Type":"application/json"},

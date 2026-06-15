@@ -58,6 +58,31 @@ def test_l3_countdown_auto_approves():
         assert final["status"] == "auto_approved" and final["approved"]
 
 
+def test_l3_fail_closed_denies_on_timeout():
+    """⑥b:fail-closed 时 L3 倒计时到点 → 自动否决(而非自动放行)。"""
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        eng = RiskEngine(make_ws(tmp), Ledger(tmp / "l.db"), fail_closed_on_timeout=True)
+        r = eng.request("tester", "push_msg", "推送", task_id="t1")
+        assert r["status"] == "pending"
+        time.sleep(1.1)
+        final = eng.check(r["approval_id"])
+        assert final["status"] == "denied_timeout" and not final["approved"]
+
+
+def test_fail_closed_read_from_settings():
+    """⑥b:未显式传参时,RiskEngine 从工作区 settings.yaml 读 approval_fail_closed。"""
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        (tmp / "config").mkdir()
+        (tmp / "config" / "settings.yaml").write_text("approval_fail_closed: true\n", encoding="utf-8")
+        eng = RiskEngine(make_ws(tmp), Ledger(tmp / "l.db"))   # agents_dir.parent = tmp
+        assert eng.fail_closed_on_timeout is True
+        # 默认(无设置)仍 fail-open
+        eng2 = RiskEngine(make_ws(tmp / "x"), Ledger(tmp / "l2.db"))
+        assert eng2.fail_closed_on_timeout is False
+
+
 def test_l3_can_be_denied_before_deadline():
     with tempfile.TemporaryDirectory() as d:
         eng = make_engine(Path(d))

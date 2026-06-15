@@ -42,7 +42,7 @@ _loop: asyncio.AbstractEventLoop | None = None
 EDITABLE = re.compile(
     r"^(CrewOS\.md|config/dlp_blocklist\.txt|config/settings\.yaml|config/crontab\.yaml|"
     r"memory/[\w\-./一-鿿]+\.md|"
-    r"agents/[a-z_]+/(role\.md|provider\.yaml|actions\.yaml|memory/[a-z_]+\.md))$"
+    r"agents/[a-z][a-z0-9_]*/(role\.md|provider\.yaml|actions\.yaml|memory/[a-z][a-z0-9_]*\.md))$"
 )
 
 
@@ -53,7 +53,7 @@ def _settings() -> dict:
             "discord_webhook": "", "webhook_url": "", "dashboard_token": "",
             "watchdog_suspicious_minutes": 5.0, "watchdog_critical_minutes": 15.0,
             "monthly_hard_usd": 0.0, "ceo_model": "", "ceo_provider": "",
-            "cny_rate": 7.2, "tavily_key": ""}
+            "cny_rate": 7.2, "tavily_key": "", "approval_fail_closed": False}
     if f.exists():
         base.update(yaml.safe_load(f.read_text(encoding="utf-8")) or {})
     return base
@@ -643,7 +643,7 @@ def api_put_settings(body: dict):
                          "discord_webhook", "webhook_url", "dashboard_token",
                          "monthly_hard_usd", "watchdog_suspicious_minutes",
                          "watchdog_critical_minutes", "ceo_model", "ceo_provider",
-                         "cny_rate", "tavily_key",
+                         "cny_rate", "tavily_key", "approval_fail_closed",
                          "u_memory_enabled", "u_hot_dir", "u_wiki_dir")})
     # 注意:u_gbrain_bin / u_gbrain_path(被执行的二进制)故意不在 API 可写白名单内 ——
     # 只能改 settings.yaml(已等于有文件系统权限),避免经联网端点注入任意可执行文件。
@@ -910,13 +910,29 @@ async def _startup():
     CronScheduler(ROOT, _router).start()
 
 
-def run(root: Path, port: int = 8466):
-    """被 crewos start 调用。安全铁律:只绑 127.0.0.1。"""
+def _is_loopback(host: str) -> bool:
+    """只认字面环回(不做 DNS,避免不同机器/CI 解析漂移)。"""
+    return host in ("127.0.0.1", "::1", "localhost")
+
+
+def run(root: Path, port: int = 8466, host: str | None = None):
+    """被 crewos start 调用。安全默认:只绑 127.0.0.1。
+    要绑非环回(LAN/公网)必须先设 dashboard_token —— 否则拒启(fail-closed),
+    避免重蹈 OpenClaw 把控制面暴露公网泄 key 的覆辙。host 优先级:参数 > CREWOS_HOST > 127.0.0.1。"""
     global ROOT
     from .workspace import load_env
     ROOT = Path(root).resolve()
     load_env(ROOT)
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    host = (host or os.environ.get("CREWOS_HOST") or "127.0.0.1").strip()
+    if not _is_loopback(host):
+        token = str(_settings().get("dashboard_token") or "").strip()
+        if not token:
+            raise SystemExit(
+                f"[安全] 拒绝把 Mission Control 绑到非环回地址 {host} 却不设访问令牌——\n"
+                f"这正是 OpenClaw 约 2 万实例控制面暴露公网、泄露 key 的翻车点。\n"
+                f"请先在 CONFIG / config/settings.yaml 设 dashboard_token,"
+                f"或保持默认 127.0.0.1 + 走加密隧道远程访问。")
+    uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
 def main():
@@ -924,8 +940,10 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--root", default=str(DEFAULT_WS))
     p.add_argument("--port", type=int, default=8466)
+    p.add_argument("--host", default=None,
+                   help="绑定地址(默认 127.0.0.1;绑非环回需先设 dashboard_token)")
     args = p.parse_args()
-    run(Path(args.root).expanduser(), args.port)
+    run(Path(args.root).expanduser(), args.port, host=args.host)
 
 
 if __name__ == "__main__":

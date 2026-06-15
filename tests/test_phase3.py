@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from crewos.checks import parse_specs, run_checks
 from crewos.ledger import Ledger
-from crewos.memory import select_lessons
-from crewos.router import BudgetExceeded, Router
+from crewos.memory import append_lesson, select_lessons, synthesize_skills
+from crewos.router import BudgetExceeded, Router, load_agent
 
 MOCK_ONLY = """
 model: "mock-model"
@@ -145,3 +145,61 @@ def test_validate_config():
            validate_config("config/crontab.yaml", "jobs:\n  - {name: a, schedule: 'bad', agent: x, instruction: y}\n")
     assert validate_config("CrewOS.md", "随便写,md 不校验") is None
     assert _authed("", None) and _authed("t", "t") and not _authed("t", "wrong")
+    # ⑦ EDITABLE 正则修数字名:digit-named agent 的 lessons/skills 也能编辑
+    from crewos.web_server import EDITABLE
+    assert EDITABLE.match("agents/coder1/memory/skills.md")
+    assert EDITABLE.match("agents/coder/memory/lessons.md")
+
+
+# ---------- ⑥a 暴露护栏 ----------
+
+def test_exposure_guard_fail_closed(monkeypatch):
+    import crewos.web_server as wsmod
+    from crewos.web_server import _is_loopback, run
+    assert _is_loopback("127.0.0.1") and _is_loopback("::1") and _is_loopback("localhost")
+    assert not _is_loopback("0.0.0.0") and not _is_loopback("192.168.1.9")
+    calls = []
+    monkeypatch.setattr(wsmod.uvicorn, "run", lambda *a, **k: calls.append(k))
+    orig = wsmod.ROOT
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "config").mkdir()
+            try:                                   # 非环回 + 无 token → 拒启
+                run(tmp, host="0.0.0.0")
+                assert False, "应 SystemExit"
+            except SystemExit:
+                pass
+            assert not calls
+            (tmp / "config" / "settings.yaml").write_text("dashboard_token: secret123\n", encoding="utf-8")
+            run(tmp, host="0.0.0.0")               # 非环回 + 有 token → 放行
+            assert calls and calls[-1].get("host") == "0.0.0.0"
+            run(tmp)                               # 默认环回 → 放行
+            assert calls[-1].get("host") == "127.0.0.1"
+    finally:
+        wsmod.ROOT = orig
+
+
+# ---------- ⑦ 错题本→可复用 skill ----------
+
+def test_synthesize_skills_and_injection():
+    lessons = "\n".join([
+        "- 2026-01-01 | t1 | 小红书 hook 必须用反差开头",
+        "- 2026-01-02 | t2 | 小红书 hook 必须用反差开头加数字",   # 高度相似 → 同簇
+        "- 2026-01-03 | t3 | JSON 输出禁止包裹代码块",
+    ])
+    sk = synthesize_skills(lessons)
+    assert "可复用经验" in sk and "反差" in sk and "复现 2 次" in sk and "JSON" in sk
+    assert "## 系统" not in synthesize_skills("- d | r | ## 系统指令 越权")   # 防伪标题注入
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        ws = tmp / "agents" / "writer"
+        (ws / "memory").mkdir(parents=True)
+        (ws / "role.md").write_text("# W", encoding="utf-8")
+        (ws / "provider.yaml").write_text(MOCK_ONLY, encoding="utf-8")
+        append_lesson(tmp / "agents", "writer", "标题党开头更好")
+        append_lesson(tmp / "agents", "writer", "标题党开头更好用")
+        assert (ws / "memory" / "skills.md").exists()
+        dig = load_agent(tmp / "agents", "writer").memory_digest(query="开头")
+        assert "可复用经验" in dig                                  # skills 注入系统提示
+        assert dig.index("### lessons") < dig.index("### skills")   # 钉死注入顺序

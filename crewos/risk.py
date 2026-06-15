@@ -53,9 +53,17 @@ class RiskEngine:
         # L3 倒计时到点的语义:默认 fail-OPEN(无人反对→自动放行,向后兼容);
         # settings.approval_fail_closed=true 则 fail-CLOSED(超时→自动否决,需人工显式批准)。
         # 未显式传参时从工作区 settings.yaml 读,保证看板/MCP/CLI 三进程口径一致。
-        if fail_closed_on_timeout is None:
-            fail_closed_on_timeout = self._read_fail_closed_setting()
-        self.fail_closed_on_timeout = bool(fail_closed_on_timeout)
+        # None=随 settings.yaml 实时读(看板/MCP/CLI 口径一致,长驻 MCP 进程也能跟上中途改的设置);
+        # True/False=显式覆盖(测试用)。
+        self._fc_explicit = fail_closed_on_timeout
+        self.fail_closed_on_timeout = (bool(fail_closed_on_timeout)
+                                       if fail_closed_on_timeout is not None
+                                       else self._read_fail_closed_setting())
+
+    def _current_fail_closed(self) -> bool:
+        """结算时取当前值:显式覆盖优先,否则实时读设置(长驻进程不缓存陈旧值)。"""
+        return (bool(self._fc_explicit) if self._fc_explicit is not None
+                else self._read_fail_closed_setting())
 
     def _read_fail_closed_setting(self) -> bool:
         try:
@@ -115,7 +123,7 @@ class RiskEngine:
             "SELECT id, task_id, agent, action FROM approvals "
             "WHERE status='pending' AND deadline_ts IS NOT NULL AND deadline_ts<=?",
             (time.time(),)).fetchall()
-        fc = self.fail_closed_on_timeout
+        fc = self._current_fail_closed()
         new_status = "denied_timeout" if fc else "auto_approved"
         decided_by = "timeout_failclosed" if fc else "countdown"
         for r in rows:

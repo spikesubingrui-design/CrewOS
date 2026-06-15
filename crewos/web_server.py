@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import hmac
 import os
 import re
+import socket
 import sys
 import threading
 import time
@@ -34,6 +36,7 @@ from .router import (AgentPaused, AllChannelsDown, BudgetExceeded,
                      EvalGateBlocked, InboundSensitive, Router, load_agent)
 
 ROOT = Path(".")
+_BIND_HOST = "127.0.0.1"   # 实际绑定地址(run() 设置);api_put_settings 据此禁止公网态清空 token
 app = FastAPI(title="CrewOS")
 _clients: set[WebSocket] = set()
 _loop: asyncio.AbstractEventLoop | None = None
@@ -55,7 +58,10 @@ def _settings() -> dict:
             "monthly_hard_usd": 0.0, "ceo_model": "", "ceo_provider": "",
             "cny_rate": 7.2, "tavily_key": "", "approval_fail_closed": False}
     if f.exists():
-        base.update(yaml.safe_load(f.read_text(encoding="utf-8")) or {})
+        try:
+            base.update(yaml.safe_load(f.read_text(encoding="utf-8")) or {})
+        except Exception:
+            pass     # settings.yaml 损坏 → 回退默认(暴露护栏因此仍 fail-closed,不裸抛栈)
     return base
 
 
@@ -634,6 +640,14 @@ def api_get_settings():
 
 @app.put("/api/settings")
 def api_put_settings(body: dict):
+    # 安全:服务器正绑在非环回地址时,禁止把 dashboard_token 清空 —— 否则运行中就变成
+    # 公网无鉴权控制面(_authed 对空 token 放行所有人),正是暴露护栏要堵的口子。
+    if ("dashboard_token" in body and not str(body.get("dashboard_token") or "").strip()
+            and not _is_loopback(_BIND_HOST)):
+        return JSONResponse({"error": "token_required_on_public_bind",
+                             "detail": f"服务器绑在非环回地址 {_BIND_HOST},拒绝清空 dashboard_token"
+                                       f"(会变成公网无鉴权)。如需关闭鉴权请改回 127.0.0.1 重启。"},
+                            status_code=409)
     f = ROOT / "config" / "settings.yaml"
     f.parent.mkdir(exist_ok=True)
     cur = _settings()
@@ -911,19 +925,29 @@ async def _startup():
 
 
 def _is_loopback(host: str) -> bool:
-    """只认字面环回(不做 DNS,避免不同机器/CI 解析漂移)。"""
-    return host in ("127.0.0.1", "::1", "localhost")
+    """是否真环回。127.0.0.1/::1 直认;localhost 需解析确认全部落在环回段
+    (防被劫持的 /etc/hosts 把 localhost 指向公网地址而绕过 token 门禁);解析不了→当非环回(fail-closed)。"""
+    if host in ("127.0.0.1", "::1"):
+        return True
+    if host == "localhost":
+        try:
+            addrs = {i[4][0] for i in socket.getaddrinfo(host, None)}
+            return bool(addrs) and all(ipaddress.ip_address(a).is_loopback for a in addrs)
+        except Exception:
+            return False
+    return False
 
 
 def run(root: Path, port: int = 8466, host: str | None = None):
     """被 crewos start 调用。安全默认:只绑 127.0.0.1。
     要绑非环回(LAN/公网)必须先设 dashboard_token —— 否则拒启(fail-closed),
-    避免重蹈 OpenClaw 把控制面暴露公网泄 key 的覆辙。host 优先级:参数 > CREWOS_HOST > 127.0.0.1。"""
-    global ROOT
+    避免重蹈 OpenClaw 把控制面暴露公网泄 key 的覆辙。host 优先级:参数 > CREWOS_HOST(进程环境) > 127.0.0.1。"""
+    global ROOT, _BIND_HOST
     from .workspace import load_env
-    ROOT = Path(root).resolve()
+    env_host = os.environ.get("CREWOS_HOST")   # 在 load_env 之前读:只认真实进程环境,
+    ROOT = Path(root).resolve()                # 不让工作区 .env 静默改绑定地址(避免意外暴露)
     load_env(ROOT)
-    host = (host or os.environ.get("CREWOS_HOST") or "127.0.0.1").strip()
+    host = (host or env_host or "127.0.0.1").strip()
     if not _is_loopback(host):
         token = str(_settings().get("dashboard_token") or "").strip()
         if not token:
@@ -932,6 +956,7 @@ def run(root: Path, port: int = 8466, host: str | None = None):
                 f"这正是 OpenClaw 约 2 万实例控制面暴露公网、泄露 key 的翻车点。\n"
                 f"请先在 CONFIG / config/settings.yaml 设 dashboard_token,"
                 f"或保持默认 127.0.0.1 + 走加密隧道远程访问。")
+    _BIND_HOST = host
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 

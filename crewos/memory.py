@@ -34,7 +34,10 @@ def append_lesson(agents_dir: str | Path, agent: str, lesson: str,
     text = text.replace("(暂无记录)", "").rstrip() + "\n"
     day = time.strftime("%Y-%m-%d")
     ref = f"{task_id} R{round}" if task_id else "—"
-    f.write_text(f"{text}- {day} | {ref} | {lesson.strip()}\n", encoding="utf-8")
+    # 安全:把整条教训压成单行(LLM 产出/审阅意见是不可信文本;含换行就能在注入的系统提示里
+    # 伪造 `### skills` 之类的段落标题 → 越权指令)。一条教训 = 一行,杜绝注入伪标题。
+    one_line = re.sub(r"[\r\n]+", " ", lesson).strip()
+    f.write_text(f"{text}- {day} | {ref} | {one_line}\n", encoding="utf-8")
     _write_skills(agent_dir, f)     # ⑦ 顺带把错题本提炼成可复用经验,自动注入后续派单
     return f
 
@@ -60,6 +63,7 @@ def synthesize_skills(lessons_text: str, max_chars: int = 1200) -> str:
             entries.append(text)
     if not entries:
         return ""
+    entries = entries[-200:]        # 只就近聚类最近 200 条:聚类是 O(n²),封顶免长跑 agent 越写越卡
     clusters = []   # [{rep, bg, n}]
     for e in entries:
         eb = _bigrams(e)
@@ -82,11 +86,15 @@ def synthesize_skills(lessons_text: str, max_chars: int = 1200) -> str:
 
 def _write_skills(agent_dir: Path, lessons_file: Path) -> None:
     """把错题本提炼成 skills.md(load_agent 的 memory/*.md glob 会自动注入到系统提示)。
-    纯本地文件,永不上传(隐私铁律);提炼失败绝不阻断记教训主流程。"""
+    纯本地文件,永不上传(隐私铁律);提炼失败绝不阻断记教训主流程。
+    错题本被清空/无可提炼时删除旧 skills.md,避免陈旧内容继续注入。"""
+    sf = agent_dir / "memory" / "skills.md"
     try:
         skills = synthesize_skills(lessons_file.read_text(encoding="utf-8"))
         if skills:
-            (agent_dir / "memory" / "skills.md").write_text(skills + "\n", encoding="utf-8")
+            sf.write_text(skills + "\n", encoding="utf-8")
+        elif sf.exists():
+            sf.unlink()
     except Exception:
         pass
 

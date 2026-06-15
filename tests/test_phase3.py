@@ -176,8 +176,30 @@ def test_exposure_guard_fail_closed(monkeypatch):
             assert calls and calls[-1].get("host") == "0.0.0.0"
             run(tmp)                               # 默认环回 → 放行
             assert calls[-1].get("host") == "127.0.0.1"
+            # 运行中公网绑定态:禁止把 dashboard_token 清空(否则瞬变公网无鉴权)
+            orig_bind = wsmod._BIND_HOST
+            wsmod._BIND_HOST = "0.0.0.0"
+            resp = wsmod.api_put_settings({"dashboard_token": ""})
+            assert getattr(resp, "status_code", 200) == 409
+            wsmod._BIND_HOST = "127.0.0.1"
+            assert wsmod.api_put_settings({"cny_rate": 7.3}).get("cny_rate") == 7.3   # 环回态正常
+            wsmod._BIND_HOST = orig_bind
     finally:
         wsmod.ROOT = orig
+
+
+def test_skills_cleared_when_lessons_emptied():
+    """⑦:错题本被清空(只剩表头)后,陈旧 skills.md 被删除,不再注入。"""
+    from crewos.memory import _write_skills, append_lesson
+    with tempfile.TemporaryDirectory() as d:
+        agents = make_ws(Path(d))
+        append_lesson(agents, "tester", "教训甲:hook 用反差")
+        sf = agents / "tester" / "memory" / "skills.md"
+        assert sf.exists()
+        lf = agents / "tester" / "memory" / "lessons.md"
+        lf.write_text("# 错题本\n", encoding="utf-8")        # 清空到只剩表头
+        _write_skills(agents / "tester", lf)
+        assert not sf.exists()
 
 
 # ---------- ⑦ 错题本→可复用 skill ----------

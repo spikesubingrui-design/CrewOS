@@ -8,16 +8,28 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#04060c;--panel:rgba(9,13,24,.72);--panel-solid:#0a0f1c;
+  --bg:#04060c;--panel:rgba(12,17,30,.66);--panel-solid:#0a0f1c;--surface:rgba(150,180,255,.025);
   --line:rgba(150,180,255,.10);--line-strong:rgba(150,180,255,.22);
   --text:#e8eefc;--dim:#5d6b85;--ice:#9db8ff;--blue:#4f7cff;
   --green:#2ee59d;--amber:#ffb454;--red:#ff5c5c;
   --disp:"Space Grotesk",system-ui,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  /* 高端化:统一缓动 + 半径阶 + 高光/投影,让每个面板像一块嵌进托盘的玻璃 */
+  --ease:cubic-bezier(.32,.72,0,1);
+  --r-panel:13px;--r-ctl:9px;--r-chip:6px;
+  --hi:inset 0 1px 0 rgba(255,255,255,.055);            /* 顶部内高光 */
+  --elev:0 1px 2px rgba(0,0,0,.4),0 14px 40px -12px rgba(0,0,0,.55);  /* 柔和环境投影 */
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
-body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px;overflow-x:hidden}
+body{color:var(--text);font-family:var(--mono);font-size:13px;overflow-x:hidden;
+  /* 不再是纯黑平面:叠几团极淡的辉光做空间纵深(蓝/青/紫),固定不随滚动 */
+  background:
+    radial-gradient(1100px 720px at 12% -8%, rgba(79,124,255,.10), transparent 60%),
+    radial-gradient(1000px 680px at 92% 4%, rgba(46,229,157,.06), transparent 55%),
+    radial-gradient(1200px 900px at 78% 108%, rgba(183,156,255,.07), transparent 60%),
+    var(--bg);
+  background-attachment:fixed}
 #stars{position:fixed;inset:0;z-index:0}
 .micro{font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--dim)}
 ::-webkit-scrollbar{width:6px;height:6px}
@@ -39,10 +51,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13
   margin-left:12px;vertical-align:1px}
 nav{display:flex;gap:4px;height:100%}
 .tab{display:flex;align-items:center;padding:0 18px;cursor:pointer;color:var(--dim);
-  font-size:10.5px;letter-spacing:.28em;transition:.2s;user-select:none;
+  font-size:10.5px;letter-spacing:.28em;transition:color .3s var(--ease),border-color .3s var(--ease);user-select:none;
   background:none;border:none;border-bottom:2px solid transparent;font-family:inherit;height:100%}
 .tab:hover{color:var(--text)}
-.tab.active{color:var(--ice);border-bottom-color:var(--blue)}
+.tab.active{color:var(--ice);border-bottom-color:var(--blue);text-shadow:0 0 16px rgba(157,184,255,.5)}
 /* 键盘可达性:Tab 聚焦时给清晰焦点环(导航标签 + 可折叠面板头) */
 .tab:focus-visible,.panel-h[role="button"]:focus-visible{outline:2px solid var(--blue);outline-offset:-2px;color:var(--text)}
 .panel-h[role="button"]{cursor:pointer}
@@ -51,16 +63,20 @@ nav{display:flex;gap:4px;height:100%}
 .clockbox b{font-weight:600;font-size:13.5px;color:var(--text);display:block;font-variant-numeric:tabular-nums}
 #fuelbox b{color:var(--amber)}
 #sim-btn{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;padding:10px 20px;cursor:pointer;
-  color:var(--bg);background:var(--ice);border:none;border-radius:2px;font-weight:600;transition:.2s}
+  color:var(--bg);background:var(--ice);border:none;border-radius:var(--r-ctl);font-weight:600;
+  transition:transform .2s var(--ease),background .25s var(--ease),box-shadow .25s var(--ease)}
 #sim-btn:hover{background:#fff;box-shadow:0 0 24px rgba(157,184,255,.45)}
+#sim-btn:active{transform:scale(.97)}
 #sim-btn:disabled{opacity:.35;cursor:wait}
 
 /* ───── 视图 ───── */
 .view{display:none;position:relative;z-index:5;padding:18px 26px;max-width:1680px;margin:0 auto}
 .view.active{display:block}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:3px;backdrop-filter:blur(6px)}
+.panel{position:relative;border:1px solid var(--line);border-radius:var(--r-panel);
+  background:linear-gradient(180deg,rgba(150,180,255,.05),rgba(150,180,255,.012)),var(--panel);
+  backdrop-filter:blur(14px) saturate(1.1);box-shadow:var(--hi),var(--elev)}
 .panel-h{display:flex;align-items:center;justify-content:space-between;
-  padding:12px 16px;border-bottom:1px solid var(--line)}
+  padding:13px 17px;border-bottom:1px solid var(--line)}
 .panel-h .micro{color:var(--ice)}
 
 /* ───── ORBIT 布局 ───── */
@@ -135,7 +151,7 @@ nav{display:flex;gap:4px;height:100%}
 #orbit-hud div::before{content:"▮ ";color:var(--blue)}
 #orbit-ctl{position:absolute;right:14px;top:12px;z-index:6;display:flex;align-items:center;gap:8px}
 #orbit-ctl select{font-size:10px;padding:6px 8px;background:var(--panel-solid);border:1px solid var(--line);
-  color:var(--text);border-radius:2px;outline:none}
+  color:var(--text);border-radius:var(--r-ctl);outline:none}
 
 /* 遥测 */
 #telemetry{display:flex;flex-direction:column;overflow:hidden}
@@ -154,16 +170,21 @@ nav{display:flex;gap:4px;height:100%}
 #transmit{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:13px 18px}
 #transmit .micro{white-space:nowrap}
 select,input[type=text]{background:var(--panel-solid);border:1px solid var(--line);color:var(--text);
-  font-family:var(--mono);font-size:12px;padding:10px 13px;border-radius:2px;outline:none}
+  font-family:var(--mono);font-size:12px;padding:10px 13px;border-radius:var(--r-ctl);outline:none;
+  transition:border-color .25s var(--ease),box-shadow .25s var(--ease)}
 /* 原生下拉弹窗:显式深底浅字,修复白底浅字看不清 */
 select option{background:var(--panel-solid);color:var(--text)}
-select:focus,input:focus,textarea:focus{border-color:var(--blue)}
+select:focus,input:focus,textarea:focus{border-color:var(--blue);
+  box-shadow:0 0 0 3px rgba(79,124,255,.16)}    /* 聚焦辉光环,取代生硬变色 */
 #tx-input{flex:1}
 .btn{font-family:var(--mono);font-size:10px;letter-spacing:.2em;padding:11px 22px;cursor:pointer;
-  background:transparent;color:var(--ice);border:1px solid var(--ice);border-radius:2px;transition:.2s;font-weight:600}
-.btn:hover{background:var(--ice);color:var(--bg);box-shadow:0 0 18px rgba(157,184,255,.4)}
+  background:transparent;color:var(--ice);border:1px solid var(--ice);border-radius:var(--r-ctl);
+  transition:transform .2s var(--ease),background .25s var(--ease),color .25s var(--ease),box-shadow .25s var(--ease);
+  font-weight:600}
+.btn:hover{background:var(--ice);color:var(--bg);box-shadow:0 0 22px rgba(157,184,255,.45)}
+.btn:active{transform:scale(.97)}      /* 物理按压 */
 .btn.solid{background:var(--blue);border-color:var(--blue);color:#fff}
-.btn.solid:hover{filter:brightness(1.2)}
+.btn.solid:hover{filter:brightness(1.15);box-shadow:0 0 22px rgba(79,124,255,.5)}
 
 /* ───── MISSIONS ───── */
 #board{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
@@ -174,8 +195,9 @@ select:focus,input:focus,textarea:focus{border-color:var(--blue)}
 .mcol[data-s=done] .panel-h .micro{color:var(--ice)}
 .mcol .body{min-height:380px;padding:10px}
 .mission{border:1px solid var(--line);border-left:2px solid var(--line-strong);padding:12px 14px;
-  margin-bottom:10px;cursor:pointer;transition:.2s;background:rgba(150,180,255,.02)}
-.mission:hover{border-color:var(--ice);transform:translateX(2px)}
+  margin-bottom:10px;cursor:pointer;border-radius:var(--r-ctl);background:var(--surface);
+  transition:transform .35s var(--ease),border-color .35s var(--ease),box-shadow .35s var(--ease)}
+.mission:hover{border-color:var(--ice);transform:translateY(-2px);box-shadow:var(--elev)}
 .mission .mt{font-size:12px;line-height:1.5}
 .mission .mm{display:flex;justify-content:space-between;margin-top:9px;font-size:9.5px;color:var(--dim)}
 .mission .mm b{color:var(--amber);font-weight:400}
@@ -186,15 +208,16 @@ select:focus,input:focus,textarea:focus{border-color:var(--blue)}
 #ask{display:none;position:fixed;inset:0;background:rgba(2,4,9,.86);z-index:120;backdrop-filter:blur(4px);
   align-items:center;justify-content:center;animation:adrop .2s}
 #ask.open{display:flex}
-#ask-box{background:var(--panel-solid);border:1px solid var(--line-strong);border-radius:5px;
-  padding:22px 24px;width:min(440px,92vw);box-shadow:0 18px 60px rgba(0,0,0,.55)}
+#ask-box{border:1px solid var(--line-strong);border-radius:var(--r-panel);
+  background:linear-gradient(180deg,rgba(150,180,255,.05),rgba(150,180,255,.012)),var(--panel-solid);
+  padding:22px 24px;width:min(440px,92vw);box-shadow:var(--hi),0 24px 70px rgba(0,0,0,.6)}
 #ask-title{font-size:13px;color:var(--text);margin-bottom:14px;line-height:1.5}
 #ask-input{width:100%;margin-bottom:16px}
 #ask-btns{display:flex;justify-content:flex-end;gap:10px}
 #modal{display:none;position:fixed;inset:0;background:rgba(2,4,9,.88);z-index:100;padding:46px;backdrop-filter:blur(4px)}
 #modal.open{display:flex;align-items:flex-start;justify-content:center}
 #modal-box{background:var(--panel-solid);border:1px solid var(--line-strong);max-width:780px;width:100%;
-  max-height:84vh;overflow-y:auto}
+  max-height:84vh;overflow-y:auto;border-radius:var(--r-panel);box-shadow:var(--hi),0 30px 80px rgba(0,0,0,.6)}
 #modal-box .panel-h{position:sticky;top:0;background:var(--panel-solid);z-index:2}
 #modal-close{cursor:pointer;color:var(--dim);font-size:15px}
 #modal-close:hover{color:var(--text)}
@@ -212,13 +235,14 @@ select:focus,input:focus,textarea:focus{border-color:var(--blue)}
 .frow{margin-bottom:18px}
 .frow label{display:block;margin-bottom:8px}
 .frow input[type=number]{width:100%;background:rgba(150,180,255,.04);border:1px solid var(--line);
-  color:var(--text);font-family:var(--mono);padding:10px 13px;border-radius:2px}
+  color:var(--text);font-family:var(--mono);padding:10px 13px;border-radius:var(--r-ctl)}
 textarea{width:100%;background:rgba(2,5,12,.6);border:1px solid var(--line);color:var(--text);
-  font-family:var(--mono);font-size:12px;line-height:1.7;padding:14px;border-radius:2px;
-  min-height:400px;resize:vertical;outline:none}
+  font-family:var(--mono);font-size:12px;line-height:1.7;padding:14px;border-radius:var(--r-ctl);
+  min-height:400px;resize:vertical;outline:none;
+  transition:border-color .25s var(--ease),box-shadow .25s var(--ease)}
 #s-blocklist{min-height:110px}
 .chip{display:inline-block;font-size:9px;letter-spacing:.1em;padding:3px 9px;margin:2px 4px 2px 0;
-  border:1px solid;border-radius:1px}
+  border:1px solid;border-radius:var(--r-chip)}
 .chip.ok{color:var(--green);border-color:rgba(46,229,157,.4)}
 .chip.no{color:var(--amber);border-color:rgba(255,180,84,.4)}
 /* 可折叠面板 */
